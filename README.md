@@ -39,10 +39,13 @@ The parser is Math.js, so the app supports its real and complex arithmetic, trig
 - Choose 2D or 3D. 2D includes Cartesian real-axis graphs, complex domain coloring, magnitude and phase views, contour maps, and complex vector fields.
 - In 3D, map each spatial axis independently to `Re(z)`, `Im(z)`, `Re(f)`, `Im(f)`, `|f(z)|`, or `arg(f)`.
 - Set the real and imaginary domain limits and their sample counts independently. Quality presets select common densities; editing a sample count switches to Custom.
-- Domain coloring uses cyclic phase for hue and a logarithmic or linear magnitude transform for brightness. Contrast, saturation, and contour accents can be adjusted under Appearance & Color.
+- Domain coloring uses cyclic phase for hue and a logarithmic or linear magnitude transform for brightness. Contrast, saturation, contour accents, and independent viewport decorations are available under Display & Fit.
+- Cartesian curves default to a robust view. Large dynamic ranges use a symmetric-log vertical scale so finite tails remain represented without flattening the useful part of the graph. Choose All for linear fitting to every finite value, or Manual to set the vertical range. In 3D, Robust fitting uses median-absolute-deviation bounds, limits mapped-axis spans to twice the input-domain span, and omits triangles outside those display bounds while retaining their original samples; All fits the full finite geometry range, and Manual sets camera distance.
+- Cartesian asymptote enhancement adds a bounded number of exact expression evaluations near suspected jumps. Curves break at likely discontinuities; the underlying sample validity is unchanged.
 - Orbit with left drag, pan with middle drag, zoom with the wheel, double-click to refit, and use the Top / Front / Side / Fit controls. Switch between perspective and orthographic projection in the camera toolbar.
 - Hover a graph or a visible surface point to inspect its input, complex output, magnitude, and argument.
-- Save/load JSON visualization configurations; export sampled values as CSV; save a viewport screenshot as PNG.
+- Save/open versioned `.cstudio` projects (JSON internally), while legacy unversioned JSON configurations remain loadable. Projects preserve visualization settings and 3D camera state. Export sampled values as CSV; save a viewport screenshot as PNG.
+- The expression field remains plain text and has a separate live MathML preview. The information button opens offline publisher content from `src/infoContent.ts`.
 
 ## Architecture
 
@@ -58,13 +61,16 @@ React controls
 
 - `src/mathExpression.ts` normalizes common LaTeX and notation such as `\\frac`, `\\sqrt`, `\\sin`, `|z|`, and the common `iy` shorthand. The evaluator itself remains Math.js rather than a custom expression parser.
 - `src/sampling.worker.ts` parses and compiles the user function, samples the domain off the UI thread, and returns typed arrays. Each new job terminates the old worker. A low-resolution preview is sent first, then replaced by the selected quality result.
-- `src/Renderers.tsx` converts samples into 2D canvas plots or colored WebGL geometry. Invalid values and triangles with large neighboring output jumps are omitted so surfaces do not bridge poles and undefined regions.
-- `src/App.tsx` owns UI state, sampling jobs, saved configurations, interaction inspection, and exports.
+- `src/Renderers.tsx` converts samples into 2D canvas plots or colored WebGL geometry. Invalid values, likely Cartesian jump segments, and triangles with large neighboring output jumps are omitted so curves and surfaces do not bridge likely poles or undefined regions.
+- `src/viewRange.ts` keeps the 2D robust range policy and 3D camera-fit bounds separate from mathematical samples. `src/asymptotes.ts` contains the targeted Cartesian jump detector.
+- `src/project.ts` owns versioned `.cstudio` serialization, validation, safe defaults, and legacy migration. `src/MathPreview.tsx` presents a non-editable MathML rendering of the parsed Math.js AST, without changing the evaluator input.
+- `src/infoContent.ts` is the editable offline publisher/about content; `src/InformationPanel.tsx` renders it.
+- `src/App.tsx` owns UI state, sampling jobs, project actions, interaction inspection, and exports.
 
 ## Extending it
 
-Add notation rewrites in `normalizeExpression` only where they are unambiguous, and rely on Math.js for expression syntax and function evaluation. Add new scalar quantities to the mapping type and `quantity` in `Renderers.tsx`, then expose them in the axis selector. New render modes can consume the same `RenderSample` values without changing the evaluator. The existing `t` input provides a path to a time slider or animation controller.
+Add notation rewrites in `normalizeExpression` only where they are unambiguous, and rely on Math.js for expression syntax and function evaluation. Add new scalar quantities to the mapping type and `quantity` in `Renderers.tsx`, then expose them in the axis selector. New render modes can consume the same `RenderSample` values without changing the evaluator. Add persisted controls through `AppConfig` and the validator/migration functions in `src/project.ts`. The existing `t` input provides a path to a time slider or animation controller.
 
 ## Current scope
 
-This is a visualization engine rather than a CAS. Sampling is uniform; quality changes progressively refine the entire grid, and discontinuities are handled with finite-value filtering and local triangle rejection. Automatic adaptive subdivision, parametric and implicit surfaces, volumetric rendering, animation controls, and direct 3D mesh-file export are not implemented yet. The surface renderer is GPU-backed, while arbitrary user expressions are evaluated on the CPU in a worker because Math.js functions cannot be compiled safely into general GLSL shaders.
+This is a visualization engine rather than a CAS. Sampling remains a rectangular uniform grid; the Cartesian enhancement is bounded local resampling only and does not introduce adaptive mesh topology. Discontinuity detection is heuristic, and robust fitting changes the display scale or clips displayed triangles without declaring finite samples invalid. Automatic adaptive subdivision, parametric and implicit surfaces, volumetric rendering, animation controls, calculus, and direct 3D mesh-file export are not implemented yet. The surface renderer is GPU-backed, while arbitrary user expressions are evaluated on the CPU in a worker because Math.js functions cannot be compiled safely into general GLSL shaders.

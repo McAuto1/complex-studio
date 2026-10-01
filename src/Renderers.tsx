@@ -1,17 +1,21 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, type PointerEvent } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { fittedBounds, inverseSymlog, symlog, type Range, cartesianView } from './viewRange';
+import type { CameraSnapshot, DisplayOptions, FitMode, Mapping, SavedCamera } from './project';
+import type { CurveSamples } from './sampling.worker';
 
 export type PlotMode = 'cartesian' | 'domain' | 'magnitude' | 'phase' | 'contours' | 'vector';
-type QuantityKey = 'inputRe' | 'inputIm' | 'outputRe' | 'outputIm' | 'magnitude' | 'phase';
+type QuantityKey = Mapping;
 export type AxisMap = { x: QuantityKey; y: QuantityKey; z: QuantityKey };
 export type RenderSample = {
   id: number; type: 'result'; resolution: number; rows: number; re: Float32Array; im: Float32Array;
   valid: Uint8Array; mode: 'surface' | 'domain' | 'cartesian';
   domain: { xmin: number; xmax: number; ymin: number; ymax: number };
+  expression: string; dataKey: string; curve?: CurveSamples;
 };
 export type CameraView = { kind: 'default' | 'top' | 'front' | 'side'; key: number };
-type ColorConfig = { contrast: number; saturation: number; logMagnitude: boolean; contours: boolean; showGrid: boolean; wireframe: boolean };
+type ColorConfig = { contrast: number; saturation: number; logMagnitude: boolean; contours: boolean };
 const quantity = (map: QuantityKey, x: number, y: number, re: number, im: number) => {
   if (map === 'inputRe') return x;
   if (map === 'inputIm') return y;
@@ -64,9 +68,32 @@ function drawContourLines(ctx: CanvasRenderingContext2D, sample: RenderSample, w
   ctx.restore();
 }
 
+function getSensibleTicks(min: number, max: number, targetCount: number = 6): number[] {
+  const range = max - min;
+  if (range <= 0 || !Number.isFinite(range)) return [min];
+  const rawStep = range / targetCount;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalized = rawStep / magnitude;
+  let stepMultiplier = 1;
+  if (normalized <= 1.5) stepMultiplier = 1;
+  else if (normalized <= 3.5) stepMultiplier = 2;
+  else if (normalized <= 7.5) stepMultiplier = 5;
+  else stepMultiplier = 10;
+  const step = stepMultiplier * magnitude;
+  const ticks: number[] = [];
+  let current = Math.ceil(min / step) * step;
+  while (current <= max + 1e-9) {
+    ticks.push(current);
+    current += step;
+  }
+  return ticks;
+}
+
 export const Plot2D = forwardRef<HTMLCanvasElement, {
-  sample: RenderSample | null; plotMode: PlotMode; color: ColorConfig; onInspect: (x: number, y: number) => void; onLeave: () => void;
-}>(function Plot2D({ sample, plotMode, color, onInspect, onLeave }, forwardedRef) {
+  sample: RenderSample | null; plotMode: PlotMode; color: ColorConfig; display: DisplayOptions;
+  fitMode: FitMode; manualY: Range; viewDomain: { xmin: number; xmax: number; ymin: number; ymax: number };
+  onInspect: (x: number, y: number) => void; onLeave: () => void;
+}>(function Plot2D({ sample, plotMode, color, display, fitMode, manualY, viewDomain, onInspect, onLeave }, forwardedRef) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useImperativeHandle(forwardedRef, () => canvas.current as HTMLCanvasElement);
   useEffect(() => {
@@ -80,31 +107,45 @@ export const Plot2D = forwardRef<HTMLCanvasElement, {
     if (mode === 'cartesian') {
       const margin = { l: 62 * dpr, r: 24 * dpr, t: 26 * dpr, b: 48 * dpr };
       const pw = width - margin.l - margin.r; const ph = height - margin.t - margin.b;
-      const vals = Array.from({ length: n }, (_, k) => valid[k] ? re[k] : NaN).filter(Number.isFinite);
-      let ymin = Math.min(0, ...vals); let ymax = Math.max(0, ...vals); if (ymin === ymax) { ymin -= 1; ymax += 1; }
-      const pad = (ymax - ymin) * .08; ymin -= pad; ymax += pad;
-      const px = (x: number) => margin.l + (x - domain.xmin) / (domain.xmax - domain.xmin) * pw;
-      const py = (y: number) => margin.t + (ymax - y) / (ymax - ymin) * ph;
+      const curve = sample.curve;
+      const curveX = curve?.x ?? Float64Array.from({ length: n }, (_, i) => domain.xmin + (domain.xmax - domain.xmin) * i / Math.max(1, n - 1));
+      const curveRe = curve?.re ?? re; const curveValid = curve?.valid ?? valid;
+      const view = cartesianView(curveRe, curveValid, fitMode, manualY);
+      const breaks = curve?.breaks ?? new Uint8Array(Math.max(0, curveRe.length - 1));
+      const px = (x: number) => margin.l + (x - viewDomain.xmin) / (viewDomain.xmax - viewDomain.xmin) * pw;
+      const mappedY = (y: number) => view.scale === 'symlog' ? symlog(y, view.threshold) : y;
+      const py = (y: number) => margin.t + (view.range.max - mappedY(y)) / (view.range.max - view.range.min) * ph;
       ctx.strokeStyle = 'rgba(177,190,211,.12)'; ctx.lineWidth = 1 * dpr;
       ctx.fillStyle = '#8590a5'; ctx.font = `${11 * dpr}px Inter, sans-serif`;
-      for (let i = 0; i <= 6; i++) {
-        const xx = margin.l + pw * i / 6; ctx.beginPath(); ctx.moveTo(xx, margin.t); ctx.lineTo(xx, margin.t + ph); ctx.stroke();
-        const tick = domain.xmin + (domain.xmax - domain.xmin) * i / 6; ctx.fillText(Number(tick.toPrecision(3)).toString(), xx - 9 * dpr, margin.t + ph + 19 * dpr);
-        const yy = margin.t + ph * i / 6; ctx.beginPath(); ctx.moveTo(margin.l, yy); ctx.lineTo(margin.l + pw, yy); ctx.stroke();
-        ctx.fillText(Number((ymax - (ymax - ymin) * i / 6).toPrecision(3)).toString(), 9 * dpr, yy + 4 * dpr);
+
+      const xTicks = getSensibleTicks(viewDomain.xmin, viewDomain.xmax);
+      for (const tick of xTicks) {
+        const xx = px(tick);
+        if (display.show2DGrid) { ctx.beginPath(); ctx.moveTo(xx, margin.t); ctx.lineTo(xx, margin.t + ph); ctx.stroke(); }
+        if (display.show2DLabels) ctx.fillText(Number(tick.toPrecision(5)).toString(), xx - 9 * dpr, margin.t + ph + 19 * dpr);
+      }
+
+      const mappedTicks = getSensibleTicks(view.range.min, view.range.max);
+      for (const mappedTick of mappedTicks) {
+        const yy = margin.t + (view.range.max - mappedTick) / (view.range.max - view.range.min) * ph;
+        if (display.show2DGrid) { ctx.beginPath(); ctx.moveTo(margin.l, yy); ctx.lineTo(margin.l + pw, yy); ctx.stroke(); }
+        const physicalTick = view.scale === 'symlog' ? inverseSymlog(mappedTick, view.threshold) : mappedTick;
+        if (display.show2DLabels) ctx.fillText(Number(physicalTick.toPrecision(5)).toString(), 9 * dpr, yy + 4 * dpr);
       }
       ctx.strokeStyle = 'rgba(204,216,234,.48)'; ctx.lineWidth = 1.25 * dpr;
-      if (domain.xmin <= 0 && domain.xmax >= 0) { ctx.beginPath(); ctx.moveTo(px(0), margin.t); ctx.lineTo(px(0), margin.t + ph); ctx.stroke(); }
-      if (ymin <= 0 && ymax >= 0) { ctx.beginPath(); ctx.moveTo(margin.l, py(0)); ctx.lineTo(margin.l + pw, py(0)); ctx.stroke(); }
+      if (viewDomain.xmin <= 0 && viewDomain.xmax >= 0) { ctx.beginPath(); ctx.moveTo(px(0), margin.t); ctx.lineTo(px(0), margin.t + ph); ctx.stroke(); }
+      if (view.range.min <= mappedY(0) && view.range.max >= mappedY(0)) { ctx.beginPath(); ctx.moveTo(margin.l, py(0)); ctx.lineTo(margin.l + pw, py(0)); ctx.stroke(); }
+      ctx.save(); ctx.beginPath(); ctx.rect(margin.l, margin.t, pw, ph); ctx.clip();
       ctx.beginPath(); ctx.lineWidth = 2.5 * dpr; ctx.strokeStyle = '#87e2c2'; ctx.shadowColor = '#5fe8be'; ctx.shadowBlur = 12 * dpr;
       let down = true;
-      for (let i = 0; i < n; i++) {
-        if (!valid[i]) { down = true; continue; }
-        const xx = margin.l + pw * i / (n - 1); const yy = py(re[i]);
+      for (let i = 0; i < curveRe.length; i++) {
+        if (!curveValid[i]) { down = true; continue; }
+        if (i > 0 && breaks[i - 1]) down = true;
+        const xx = px(curveX[i]); const yy = py(curveRe[i]);
         if (down) { ctx.moveTo(xx, yy); down = false; } else ctx.lineTo(xx, yy);
       }
-      ctx.stroke(); ctx.shadowBlur = 0;
-      ctx.fillStyle = '#aab4c5'; ctx.font = `${12 * dpr}px Inter, sans-serif`; ctx.fillText('x', margin.l + pw - 10 * dpr, margin.t + ph + 38 * dpr); ctx.fillText('Re(f(x))', 15 * dpr, margin.t + 2 * dpr);
+      ctx.stroke(); ctx.restore();
+      if (display.show2DLabels) { ctx.fillStyle = '#aab4c5'; ctx.font = `${12 * dpr}px Inter, sans-serif`; ctx.fillText('x', margin.l + pw - 10 * dpr, margin.t + ph + 38 * dpr); ctx.textAlign = 'right'; ctx.fillText(`Re(f(x))${view.scale === 'symlog' ? ' · robust scale' : ''}`, margin.l + pw, margin.t + 14 * dpr); ctx.textAlign = 'left'; }
     } else {
       const image = ctx.createImageData(n, m);
       for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) {
@@ -126,13 +167,15 @@ export const Plot2D = forwardRef<HTMLCanvasElement, {
       const padding = 24 * dpr; const imageW = width - 2 * padding; const imageH = height - 2 * padding;
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; ctx.drawImage(offscreen, padding, padding, imageW, imageH);
       if (plotMode === 'contours') drawContourLines(ctx, sample, imageW, imageH);
-      if (color.showGrid) {
+      if (display.show2DGrid) {
         ctx.strokeStyle = 'rgba(210,220,238,.2)'; ctx.lineWidth = dpr;
         for (let q = 1; q < 8; q++) {
           const xx = padding + imageW * q / 8; const yy = padding + imageH * q / 8;
           ctx.beginPath(); ctx.moveTo(xx, padding); ctx.lineTo(xx, padding + imageH); ctx.stroke();
           ctx.beginPath(); ctx.moveTo(padding, yy); ctx.lineTo(padding + imageW, yy); ctx.stroke();
         }
+      }
+      if (display.show2DLabels) {
         ctx.fillStyle = '#a4adbd'; ctx.font = `${11 * dpr}px Inter, sans-serif`;
         ctx.fillText(`Re(z) ${domain.xmin} … ${domain.xmax}`, padding + 8 * dpr, height - 70 * dpr);
         ctx.save(); ctx.translate(15 * dpr, padding + imageH / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(`Im(z) ${domain.ymin} … ${domain.ymax}`, 0, 0); ctx.restore();
@@ -156,7 +199,7 @@ export const Plot2D = forwardRef<HTMLCanvasElement, {
         ctx.restore();
       }
     }
-  }, [sample, plotMode, color]);
+  }, [sample, plotMode, color, display, fitMode, manualY]);
 
   const pointer = (event: PointerEvent<HTMLCanvasElement>) => {
     if (!sample) return;
@@ -173,25 +216,33 @@ export const Plot2D = forwardRef<HTMLCanvasElement, {
   return <canvas ref={canvas} className="plot-canvas" onPointerMove={pointer} onPointerLeave={onLeave} aria-label="Mathematical plot" />;
 });
 
-export function Surface3D({ sample, axes, color, camera, projection, cameraView, onCamera, onInspect, onLeave, onReset, onCapture }: {
-  sample: RenderSample | null; axes: AxisMap; color: ColorConfig; camera: { x: number; y: number; z: number } | null; projection: 'perspective' | 'orthographic'; cameraView: CameraView;
-  onCamera: (position: { x: number; y: number; z: number }) => void; onInspect: (x: number, y: number) => void;
-  onLeave: () => void;
-  onReset: () => void;
-  onCapture: (capture: () => string | null) => void;
+export function Surface3D({ sample, axes, color, display, camera: savedCamera, projection, cameraView, fitMode, manualCameraDistance, dataKey, fitRequest, cameraRestoreRequest, onCamera, onInspect, onLeave, onReset, onCapture }: {
+  sample: RenderSample | null; axes: AxisMap; color: ColorConfig; display: DisplayOptions; camera: SavedCamera;
+  projection: 'perspective' | 'orthographic'; cameraView: CameraView; fitMode: FitMode; manualCameraDistance: number;
+  dataKey: string; fitRequest: number; cameraRestoreRequest: number;
+  onCamera: (camera: CameraSnapshot) => void; onInspect: (x: number, y: number) => void;
+  onLeave: () => void; onReset: () => void; onCapture: (capture: () => string | null) => void;
 }) {
   const host = useRef<HTMLDivElement>(null); const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null); const cameraRef = useRef<THREE.PerspectiveCamera | THREE.OrthographicCamera | null>(null);
   const perspectiveRef = useRef<THREE.PerspectiveCamera | null>(null); const orthographicRef = useRef<THREE.OrthographicCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null); const meshRef = useRef<THREE.Mesh | null>(null);
-  const fitDistanceRef = useRef(9);
-  const lastFitSampleRef = useRef<RenderSample | null>(null); const lastFitAxesRef = useRef('');
+  const fitDistanceRef = useRef(9); const lastSubjectRef = useRef(''); const lastPolicyRef = useRef('');
+  const lastFitRequestRef = useRef(fitRequest); const userInteractedRef = useRef(false);
+  const lastCameraRestoreRequestRef = useRef(0);
   const sampleRef = useRef(sample); sampleRef.current = sample;
   const onInspectRef = useRef(onInspect); onInspectRef.current = onInspect;
   const onLeaveRef = useRef(onLeave); onLeaveRef.current = onLeave;
   const onResetRef = useRef(onReset); onResetRef.current = onReset;
   const onCameraRef = useRef(onCamera); onCameraRef.current = onCamera;
   const onCaptureRef = useRef(onCapture); onCaptureRef.current = onCapture;
+  const snapshot = (active: THREE.PerspectiveCamera | THREE.OrthographicCamera, controls: OrbitControls): CameraSnapshot => ({
+    position: { x: active.position.x, y: active.position.y, z: active.position.z },
+    target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+    orthographicZoom: active instanceof THREE.OrthographicCamera ? active.zoom : 1,
+    orthographicHeight: active instanceof THREE.OrthographicCamera ? active.top - active.bottom : fitDistanceRef.current * .96,
+  });
+
   useEffect(() => {
     const element = host.current; if (!element) return;
     const scene = new THREE.Scene(); scene.background = new THREE.Color('#0b0e15');
@@ -201,7 +252,8 @@ export function Surface3D({ sample, axes, color, camera, projection, cameraView,
     element.appendChild(renderer.domElement);
     const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.dampingFactor = .075; controls.screenSpacePanning = true;
     controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE; controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN; controls.mouseButtons.RIGHT = THREE.MOUSE.DOLLY;
-    controls.addEventListener('end', () => { const active = cameraRef.current ?? camera; const offset = active.position.clone().sub(controls.target); onCameraRef.current({ x: offset.x, y: offset.y, z: offset.z }); });
+    controls.addEventListener('start', () => { userInteractedRef.current = true; });
+    controls.addEventListener('end', () => { const active = cameraRef.current ?? camera; onCameraRef.current(snapshot(active, controls)); });
     controlsRef.current = controls; sceneRef.current = scene; cameraRef.current = camera; perspectiveRef.current = camera; orthographicRef.current = ortho;
     scene.add(new THREE.HemisphereLight('#b9d2ff', '#222b3c', 2.05));
     const key = new THREE.DirectionalLight('#ffffff', 2.6); key.position.set(5, 8, 6); scene.add(key);
@@ -211,14 +263,20 @@ export function Surface3D({ sample, axes, color, camera, projection, cameraView,
     const resize = new ResizeObserver(() => {
       if (!host.current) return;
       const w = host.current.clientWidth; const h = Math.max(1, host.current.clientHeight); const aspect = w / h;
-      renderer.setSize(w, h);
-      camera.aspect = aspect; camera.updateProjectionMatrix();
+      renderer.setSize(w, h); camera.aspect = aspect; camera.updateProjectionMatrix();
       const halfHeight = Math.max(1, fitDistanceRef.current * .48); ortho.left = -halfHeight * aspect; ortho.right = halfHeight * aspect; ortho.top = halfHeight; ortho.bottom = -halfHeight; ortho.updateProjectionMatrix();
     }); resize.observe(element);
     let frame = 0; const tick = () => { frame = requestAnimationFrame(tick); controls.update(); if (cameraRef.current) renderer.render(scene, cameraRef.current); }; tick();
     onCaptureRef.current(() => { try { return renderer.domElement.toDataURL('image/png'); } catch { return null; } });
     return () => { cancelAnimationFrame(frame); resize.disconnect(); controls.dispose(); renderer.dispose(); if (renderer.domElement.parentElement === element) element.removeChild(renderer.domElement); rendererRef.current = null; cameraRef.current = null; perspectiveRef.current = null; orthographicRef.current = null; };
   }, []);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    const floorGrid = scene.getObjectByName('floor-grid'); if (floorGrid) floorGrid.visible = display.show3DGrid;
+    const worldAxes = scene.getObjectByName('world-axes'); if (worldAxes) worldAxes.visible = display.show3DAxes;
+  }, [display.show3DGrid, display.show3DAxes]);
 
   useEffect(() => {
     const controls = controlsRef.current; const previous = cameraRef.current;
@@ -230,54 +288,117 @@ export function Surface3D({ sample, axes, color, camera, projection, cameraView,
       const aspect = host.current.clientWidth / Math.max(1, host.current.clientHeight); const halfHeight = Math.max(1, fitDistanceRef.current * .48);
       next.left = -halfHeight * aspect; next.right = halfHeight * aspect; next.top = halfHeight; next.bottom = -halfHeight;
     }
-    next.updateProjectionMatrix(); controls.update();
+    next.updateProjectionMatrix(); controls.update(); onCameraRef.current(snapshot(next, controls));
   }, [projection]);
 
   useEffect(() => {
     const scene = sceneRef.current; const camera = cameraRef.current; const controls = controlsRef.current; if (!scene || !camera || !controls) return;
-    const old = scene.getObjectByName('surface-mesh');
-    if (old) { scene.remove(old); (old as THREE.Mesh).geometry.dispose(); ((old as THREE.Mesh).material as THREE.Material).dispose(); meshRef.current = null; }
+    const oldSolid = scene.getObjectByName('surface-solid') as THREE.Mesh | undefined;
+    const oldWire = scene.getObjectByName('surface-wire') as THREE.Mesh | undefined;
+    if (oldSolid) { scene.remove(oldSolid); (oldSolid.material as THREE.Material).dispose(); }
+    if (oldWire) { scene.remove(oldWire); (oldWire.material as THREE.Material).dispose(); }
+    if (oldSolid || oldWire) (oldSolid ?? oldWire)?.geometry.dispose();
+    meshRef.current = null;
     if (!sample) return;
     const { resolution: n, rows: m, domain, re, im, valid } = sample; const count = n * m;
     const position = new Float32Array(count * 3); const colors = new Float32Array(count * 3); const values = new Float64Array(count);
-    const min = [Infinity, Infinity, Infinity]; const max = [-Infinity, -Infinity, -Infinity];
     for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) {
-      const k = j * n + i; const x = domain.xmin + (domain.xmax - domain.xmin) * i / (n - 1); const y = domain.ymin + (domain.ymax - domain.ymin) * j / (m - 1);
+      const k = j * n + i; const x = domain.xmin + (domain.xmax - domain.xmin) * i / Math.max(1, n - 1); const y = domain.ymin + (domain.ymax - domain.ymin) * j / Math.max(1, m - 1);
       const vals = [quantity(axes.x, x, y, re[k], im[k]), quantity(axes.y, x, y, re[k], im[k]), quantity(axes.z, x, y, re[k], im[k])];
-      for (let a = 0; a < 3; a++) {
-        const v = valid[k] && Number.isFinite(vals[a]) && Math.abs(vals[a]) < 1e7 ? vals[a] : NaN; position[k * 3 + a] = v;
-        if (Number.isFinite(v)) { min[a] = Math.min(min[a], v); max[a] = Math.max(max[a], v); }
-      }
+      for (let a = 0; a < 3; a++) position[k * 3 + a] = valid[k] && Number.isFinite(vals[a]) && Math.abs(vals[a]) < 1e7 ? vals[a] : NaN;
       values[k] = vals[2]; const rgb = valid[k] ? domainColor(re[k], im[k], color) : [0.04, 0.045, 0.06];
       colors[k * 3] = rgb[0]; colors[k * 3 + 1] = rgb[1]; colors[k * 3 + 2] = rgb[2];
     }
-    const finiteExtent = min.every(Number.isFinite) ? min : [-1, -1, -1]; const finiteMax = max.every(Number.isFinite) ? max : [1, 1, 1];
-    const ranges = finiteExtent.map((v, i) => Math.max(1e-5, finiteMax[i] - v));
-    const typical = Math.max(1e-4, ...ranges) / Math.max(1, n - 1); const jumpLimit = typical * 11;
+    const okay = (k: number) => Boolean(valid[k] && Number.isFinite(position[k * 3]) && Number.isFinite(position[k * 3 + 1]) && Number.isFinite(position[k * 3 + 2]));
+    const preserveAxes: [boolean, boolean, boolean] = [axes.x === 'inputRe' || axes.x === 'inputIm', axes.y === 'inputRe' || axes.y === 'inputIm', axes.z === 'inputRe' || axes.z === 'inputIm'];
+    const maxRobustSpan = 2 * Math.max(domain.xmax - domain.xmin, domain.ymax - domain.ymin);
+    const fitBounds = fittedBounds(position, okay, fitMode === 'All' ? 'All' : 'Robust', count, preserveAxes, maxRobustSpan);
+
+    // Always compute robust bounds purely for the discontinuity fallback scale
+    const robustBounds = fitMode === 'Robust' ? fitBounds : fittedBounds(position, okay, 'Robust', count, preserveAxes, maxRobustSpan);
+    const robustZSpan = Math.max(1e-9, robustBounds.max[2] - robustBounds.min[2]);
+    const jumpLimit = Math.max(50, 2.0 * robustZSpan);
+
+    const ranges = fitBounds.max.map((value, axis) => Math.max(1e-5, value - fitBounds.min[axis]));
     const indices: number[] = [];
-    const okay = (k: number) => valid[k] && Number.isFinite(position[k * 3]) && Number.isFinite(position[k * 3 + 1]) && Number.isFinite(position[k * 3 + 2]);
-    // Build only locally continuous triangles; invalid samples and abrupt jumps leave intentional holes at poles and cuts.
-    const edgeOkay = (a: number, b: number) => okay(a) && okay(b) && Math.abs(values[a] - values[b]) < jumpLimit;
+    // Local secant reversal detection (same principle as asymptotes.ts detectCartesianBreaks).
+    // A pole reverses the secant direction on both sides of the edge and creates a larger
+    // spacing-normalized change across the suspected interval.  This replaces the former
+    // global jumpLimit which, when derived from Robust fitBounds, was too small and tore
+    // continuous surfaces like exp(2z).
+    const hasReversal = (a: number, b: number): boolean => {
+      const ai = a % n, aj = (a - ai) / n, bi = b % n, bj = (b - bi) / n;
+      let before: number, lo: number, hi: number, after: number;
+      if (ai === bi) { // vertical edge
+        const jLo = Math.min(aj, bj), jHi = Math.max(aj, bj);
+        if (jLo < 1 || jHi >= m - 1) return false;
+        before = (jLo - 1) * n + ai; lo = jLo * n + ai; hi = jHi * n + ai; after = (jHi + 1) * n + ai;
+      } else { // horizontal edge
+        const iLo = Math.min(ai, bi), iHi = Math.max(ai, bi);
+        if (iLo < 1 || iHi >= n - 1) return false;
+        before = aj * n + iLo - 1; lo = aj * n + iLo; hi = aj * n + iHi; after = aj * n + iHi + 1;
+      }
+      if (!okay(before) || !okay(after)) {
+        // Fallback: If neighboring samples exceed finite cutoffs or hit domain edges, we cannot test secants.
+        // In this localized edge case, fallback to an absolute jumpLimit based on independent robust scaling
+        // to prevent false walls across singularities without tying the threshold to camera framing.
+        return Math.abs(values[lo] - values[hi]) > jumpLimit;
+      }
+      const s1 = values[lo] - values[before], s2 = values[hi] - values[lo], s3 = values[after] - values[hi];
+      return s1 * s2 < 0 && s2 * s3 < 0 && Math.abs(s2) / Math.max(Math.abs(s1), Math.abs(s3), 1e-30) >= 1.04;
+    };
+    const edgeOkay = (a: number, b: number) => okay(a) && okay(b) && !hasReversal(a, b);
     for (let j = 0; j < m - 1; j++) for (let i = 0; i < n - 1; i++) {
       const a = j * n + i; const b = a + 1; const c = (j + 1) * n + i; const d = c + 1;
-      if (edgeOkay(a, b) && edgeOkay(a, c) && edgeOkay(b, d)) indices.push(a, c, b);
-      if (edgeOkay(b, c) && edgeOkay(c, d) && edgeOkay(b, d)) indices.push(b, c, d);
+      if (edgeOkay(a, c) && edgeOkay(c, b) && edgeOkay(b, a)) indices.push(a, c, b);
+      if (edgeOkay(b, c) && edgeOkay(c, d) && edgeOkay(d, b)) indices.push(b, c, d);
     }
     const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.BufferAttribute(position, 3)); geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3)); geometry.setIndex(indices); geometry.computeVertexNormals();
-    const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .62, metalness: .08, side: THREE.DoubleSide, wireframe: color.wireframe, transparent: false });
-    const mesh = new THREE.Mesh(geometry, material); mesh.name = 'surface-mesh'; scene.add(mesh); meshRef.current = mesh;
-    const axisKey = `${axes.x}:${axes.y}:${axes.z}`;
-    if (lastFitSampleRef.current !== sample || lastFitAxesRef.current !== axisKey) {
-      const center = new THREE.Vector3((finiteExtent[0] + finiteMax[0]) / 2, (finiteExtent[1] + finiteMax[1]) / 2, (finiteExtent[2] + finiteMax[2]) / 2);
-      controls.target.copy(center); const span = Math.max(...ranges); const distance = Math.max(5, span * 2.5); fitDistanceRef.current = distance; camera.position.set(center.x + distance * .62, center.y + distance * .58, center.z + distance * .72); camera.near = Math.max(.01, span / 1000); camera.far = Math.max(1000, span * 100);
-      if (camera instanceof THREE.PerspectiveCamera) camera.aspect = (host.current?.clientWidth ?? 1) / Math.max(1, host.current?.clientHeight ?? 1);
-      else { const aspect = (host.current?.clientWidth ?? 1) / Math.max(1, host.current?.clientHeight ?? 1); camera.left = -distance * .48 * aspect; camera.right = distance * .48 * aspect; camera.top = distance * .48; camera.bottom = -distance * .48; }
-      camera.updateProjectionMatrix(); controls.update(); onCameraRef.current({ x: camera.position.x - center.x, y: camera.position.y - center.y, z: camera.position.z - center.z });
-      lastFitSampleRef.current = sample; lastFitAxesRef.current = axisKey;
+    let hitMesh: THREE.Mesh | null = null;
+    if (display.show3DSurface) {
+      const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .62, metalness: .08, side: THREE.DoubleSide });
+      const solid = new THREE.Mesh(geometry, material); solid.name = 'surface-solid'; scene.add(solid); hitMesh = solid;
     }
-    const grid = scene.getObjectByName('floor-grid'); if (grid) grid.visible = color.showGrid;
-    const worldAxes = scene.getObjectByName('world-axes'); if (worldAxes) worldAxes.visible = color.showGrid;
-  }, [sample, axes, color.wireframe, color.contrast, color.logMagnitude, color.saturation, color.showGrid]);
+    if (display.show3DWireframe) {
+      const material = new THREE.MeshBasicMaterial({ color: '#a8ead2', wireframe: true, transparent: true, opacity: .48, depthWrite: false });
+      const wire = new THREE.Mesh(geometry, material); wire.name = 'surface-wire'; wire.renderOrder = 1; scene.add(wire); hitMesh ??= wire;
+    }
+    meshRef.current = hitMesh;
+
+    const subjectKey = JSON.stringify([dataKey, axes.x, axes.y, axes.z]);
+    const policyKey = JSON.stringify([fitMode, manualCameraDistance]);
+    const subjectChanged = subjectKey !== lastSubjectRef.current;
+    const policyChanged = policyKey !== lastPolicyRef.current;
+    const requested = fitRequest !== lastFitRequestRef.current;
+    const restoreLegacyCamera = cameraRestoreRequest !== lastCameraRestoreRequestRef.current && savedCamera !== null && savedCamera !== undefined && 'offset' in savedCamera;
+    if (sample.dataKey === dataKey && (requested || policyChanged || restoreLegacyCamera || (subjectChanged && !userInteractedRef.current) || (!lastSubjectRef.current && !userInteractedRef.current))) {
+      const center = new THREE.Vector3(
+        (fitBounds.min[0] + fitBounds.max[0]) / 2,
+        (fitBounds.min[1] + fitBounds.max[1]) / 2,
+        (fitBounds.min[2] + fitBounds.max[2]) / 2,
+      );
+      const span = Math.max(...ranges); const distance = fitMode === 'Manual' ? manualCameraDistance : Math.max(5, span * 2.5);
+      fitDistanceRef.current = distance; controls.target.copy(center);
+      if (restoreLegacyCamera && savedCamera !== null && savedCamera !== undefined && 'offset' in savedCamera) {
+        camera.position.set(center.x + savedCamera.offset.x, center.y + savedCamera.offset.y, center.z + savedCamera.offset.z);
+      } else camera.position.set(center.x + distance * .62, center.y + distance * .58, center.z + distance * .72);
+      camera.near = Math.max(.01, span / 1000); camera.far = Math.max(1000, span * 100);
+      if (camera instanceof THREE.OrthographicCamera) {
+        const aspect = (host.current?.clientWidth ?? 1) / Math.max(1, host.current?.clientHeight ?? 1);
+        camera.left = -distance * .48 * aspect; camera.right = distance * .48 * aspect; camera.top = distance * .48; camera.bottom = -distance * .48; camera.zoom = 1;
+      } else camera.aspect = (host.current?.clientWidth ?? 1) / Math.max(1, host.current?.clientHeight ?? 1);
+      camera.updateProjectionMatrix(); controls.update(); userInteractedRef.current = false;
+      onCameraRef.current(snapshot(camera, controls));
+    }
+    if (sample.dataKey === dataKey) {
+      lastSubjectRef.current = subjectKey; lastPolicyRef.current = policyKey; lastFitRequestRef.current = fitRequest;
+      lastCameraRestoreRequestRef.current = cameraRestoreRequest;
+    }
+  }, [sample, axes, color.contrast, color.logMagnitude, color.saturation, display.show3DSurface, display.show3DWireframe, fitMode, manualCameraDistance, dataKey, fitRequest, cameraRestoreRequest]);
+
+  useEffect(() => {
+    if (cameraRestoreRequest > 0) userInteractedRef.current = true;
+  }, [cameraRestoreRequest]);
 
   useEffect(() => {
     const camera = cameraRef.current; const controls = controlsRef.current; if (!camera || !controls) return;
@@ -287,13 +408,26 @@ export function Surface3D({ sample, axes, color, camera, projection, cameraView,
     else if (cameraView.kind === 'side') camera.position.set(target.x + distance, target.y, target.z + distance * .15);
     else camera.position.set(target.x + distance * .62, target.y + distance * .58, target.z + distance * .72);
     camera.updateProjectionMatrix(); controls.update();
-    if (cameraView.key > 0) { const offset = camera.position.clone().sub(target); onCameraRef.current({ x: offset.x, y: offset.y, z: offset.z }); }
+    if (cameraView.key > 0) onCameraRef.current(snapshot(camera, controls));
   }, [cameraView.key, cameraView.kind]);
 
   useEffect(() => {
-    const currentCamera = cameraRef.current; const controls = controlsRef.current; if (!currentCamera || !controls || !sample || !camera) return;
-    currentCamera.position.copy(controls.target).add(new THREE.Vector3(camera.x, camera.y, camera.z)); controls.update();
-  }, [sample?.id, camera?.x, camera?.y, camera?.z]);
+    const currentCamera = cameraRef.current; const controls = controlsRef.current; if (!currentCamera || !controls || !savedCamera) return;
+    if ('position' in savedCamera) {
+      currentCamera.position.set(savedCamera.position.x, savedCamera.position.y, savedCamera.position.z);
+      controls.target.set(savedCamera.target.x, savedCamera.target.y, savedCamera.target.z);
+      fitDistanceRef.current = savedCamera.orthographicHeight / .96;
+      if (currentCamera instanceof THREE.OrthographicCamera) {
+        const halfHeight = savedCamera.orthographicHeight / 2;
+        const aspect = (host.current?.clientWidth ?? 1) / Math.max(1, host.current?.clientHeight ?? 1);
+        currentCamera.left = -halfHeight * aspect; currentCamera.right = halfHeight * aspect;
+        currentCamera.top = halfHeight; currentCamera.bottom = -halfHeight; currentCamera.zoom = savedCamera.orthographicZoom;
+      }
+    } else {
+      currentCamera.position.copy(controls.target).add(new THREE.Vector3(savedCamera.offset.x, savedCamera.offset.y, savedCamera.offset.z));
+    }
+    currentCamera.updateProjectionMatrix(); controls.update();
+  }, [savedCamera]);
 
   const pointer = (event: PointerEvent<HTMLDivElement>) => {
     const mesh = meshRef.current; const renderer = rendererRef.current; const camera = cameraRef.current; const source = sampleRef.current;
@@ -302,10 +436,13 @@ export function Surface3D({ sample, axes, color, camera, projection, cameraView,
     const ray = new THREE.Raycaster(); ray.setFromCamera(mouse, camera); const hit = ray.intersectObject(mesh, false)[0];
     if (!hit?.face) return;
     const n = source.resolution; const k0 = hit.face.a; const k1 = hit.face.b; const k2 = hit.face.c; const bary = hit.barycoord ?? new THREE.Vector3(1 / 3, 1 / 3, 1 / 3);
-    const getInput = (k: number) => [source.domain.xmin + (source.domain.xmax - source.domain.xmin) * (k % n) / (n - 1), source.domain.ymin + (source.domain.ymax - source.domain.ymin) * Math.floor(k / n) / (source.rows - 1)];
+    const getInput = (k: number) => [source.domain.xmin + (source.domain.xmax - source.domain.xmin) * (k % n) / (n - 1), source.domain.ymin + (source.domain.ymax - source.domain.ymin) * Math.floor(k / n) / Math.max(1, source.rows - 1)];
     const p0 = getInput(k0); const p1 = getInput(k1); const p2 = getInput(k2);
     onInspectRef.current(p0[0] * bary.x + p1[0] * bary.y + p2[0] * bary.z, p0[1] * bary.x + p1[1] * bary.y + p2[1] * bary.z);
   };
   const label = (value: QuantityKey) => ({ inputRe: 'Re(z)', inputIm: 'Im(z)', outputRe: 'Re(f)', outputIm: 'Im(f)', magnitude: '|f(z)|', phase: 'arg(f)' })[value];
-  return <div className="surface-host" ref={host} onPointerMove={pointer} onPointerLeave={() => onLeaveRef.current()} onDoubleClick={() => onResetRef.current()}><div className="axis-label label-x">X · {label(axes.x)}</div><div className="axis-label label-y">Y · {label(axes.y)}</div><div className="axis-label label-z">Z · {label(axes.z)}</div><div className="webgl-watermark">WEBGL · REAL-TIME SURFACE</div></div>;
+  return <div className="surface-host" ref={host} onPointerMove={pointer} onPointerLeave={() => onLeaveRef.current()} onDoubleClick={() => onResetRef.current()}>
+    {display.show3DAxisLabels && <><div className="axis-label label-x">X · {label(axes.x)}</div><div className="axis-label label-y">Y · {label(axes.y)}</div><div className="axis-label label-z">Z · {label(axes.z)}</div></>}
+    <div className="webgl-watermark">WEBGL · REAL-TIME SURFACE</div>
+  </div>;
 }
