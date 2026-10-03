@@ -10,7 +10,7 @@ type EditorItem =
   | { type: 'frac'; num: EditorItem[]; den: EditorItem[]; id: string }
   | { type: 'sup'; exp: EditorItem[]; id: string }
   | { type: 'sqrt'; arg: EditorItem[]; id: string }
-  | { type: 'func'; name: string; arg: EditorItem[]; id: string };
+  | { type: 'func'; name: string; arg: EditorItem[]; closed?: boolean; id: string };
 
 type CursorState = {
   path: { id: string; field: 'num' | 'den' | 'exp' | 'arg' }[];
@@ -18,6 +18,7 @@ type CursorState = {
 };
 
 function parseToEditor(str: string, isStatic = false): EditorItem[] {
+  if (!str || str.trim() === '') return [];
   try {
     const ast = math.parse(str);
     return astToEditor(ast, isStatic);
@@ -48,7 +49,7 @@ function astToEditor(node: MathNode, isStatic = false): EditorItem[] {
     }
     if (['sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'ln', 'log', 'exp', 'gamma', 'Gamma'].includes(name) && n.args.length === 1) {
       const displayName = name === 'gamma' || name === 'Gamma' ? (isStatic ? 'Γ' : 'gamma') : name;
-      return [{ type: 'func', name: displayName, arg: astToEditor(n.args[0], isStatic), id: uid() }];
+      return [{ type: 'func', name: displayName, arg: astToEditor(n.args[0], isStatic), closed: true, id: uid() }];
     }
     const displayName = isStatic && (name === 'gamma' || name === 'Gamma') ? 'Γ' : name;
     const res: EditorItem[] = displayName.split('').map((c: string) => ({ type: 'char', char: c, id: uid() }));
@@ -83,7 +84,7 @@ function cloneDeep(items: EditorItem[]): EditorItem[] {
     if (item.type === 'frac') return { ...item, num: cloneDeep(item.num), den: cloneDeep(item.den) };
     if (item.type === 'sup') return { ...item, exp: cloneDeep(item.exp) };
     if (item.type === 'sqrt') return { ...item, arg: cloneDeep(item.arg) };
-    if (item.type === 'func') return { ...item, arg: cloneDeep(item.arg) };
+    if (item.type === 'func') return { ...item, arg: cloneDeep(item.arg), closed: item.closed };
     return { ...item };
   });
 }
@@ -116,7 +117,7 @@ export function MathStatic({ expression }: { expression: string }) {
         const prev = nodes.pop();
         nodes.push(<msup key={item.id}><mrow>{prev}</mrow><mrow>{renderStatic(item.exp)}</mrow></msup>);
       } else if (item.type === 'sqrt') {
-        nodes.push(<msqrt key={item.id}><mrow>{renderStatic(item.arg)}</mrow></msqrt>);
+        nodes.push(<msqrt key={item.id}><mrow className="sqrt-radicand">{renderStatic(item.arg)}</mrow></msqrt>);
       } else if (item.type === 'func') {
         nodes.push(<React.Fragment key={item.id}><mi>{item.name}</mi><mo>(</mo><mrow>{renderStatic(item.arg)}</mrow><mo>)</mo></React.Fragment>);
       }
@@ -133,17 +134,30 @@ export function MathEditor({ value, onChange, onEnter }: { value: string; onChan
   const [showKeyboard, setShowKeyboard] = useState(false);
   const [keyboardTab, setKeyboardTab] = useState<'calculator' | 'functions'>('calculator');
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastPropValue = useRef<string>(value);
+  const lastSentValue = useRef<string>(value);
 
   useEffect(() => {
+    if (value === lastSentValue.current) {
+      lastPropValue.current = value;
+      return;
+    }
+    if (value === lastPropValue.current) {
+      return;
+    }
     const parsed = parseToEditor(value);
     setItems(parsed);
     setCursor({ path: [], offset: parsed.length });
+    lastPropValue.current = value;
+    lastSentValue.current = value;
   }, [value]);
 
   const updateItems = (newItems: EditorItem[], newCursor: CursorState) => {
     setItems(newItems);
     setCursor(newCursor);
-    onChange(serializeEditor(newItems));
+    const serialized = serializeEditor(newItems);
+    lastSentValue.current = serialized;
+    onChange(serialized);
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
@@ -220,7 +234,7 @@ export function MathEditor({ value, onChange, onEnter }: { value: string; onChan
       const newItems = cloneDeep(items);
       const arr = getTargetArray(newItems, cursor.path);
       const funcId = uid();
-      arr.splice(cursor.offset, 0, { type: 'func', name: cmd, arg: [], id: funcId });
+      arr.splice(cursor.offset, 0, { type: 'func', name: cmd, arg: [], closed: false, id: funcId });
       updateItems(newItems, { path: [...cursor.path, { id: funcId, field: 'arg' }], offset: 0 });
     } else if (cmd === 'frac') {
       const newItems = cloneDeep(items);
@@ -333,7 +347,7 @@ export function MathEditor({ value, onChange, onEnter }: { value: string; onChan
           </msup>
         );
       } else if (item.type === 'sqrt') {
-        nodes.push(<msqrt key={item.id}><mrow>{renderItems(item.arg, [...currentPath, { id: item.id, field: 'arg' }])}</mrow></msqrt>);
+        nodes.push(<msqrt key={item.id}><mrow className="sqrt-radicand">{renderItems(item.arg, [...currentPath, { id: item.id, field: 'arg' }])}</mrow></msqrt>);
       } else if (item.type === 'func') {
         nodes.push(
           <React.Fragment key={item.id}>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { all, create } from 'mathjs';
+import { Auth } from './Auth';
 import {
-  Activity, Box, Check, ChevronDown, CircleHelp, Code2, Download, Expand,
+  Activity, Box, Check, ChevronDown, CircleHelp, Code2, Download, Expand, Shrink,
   Eye, Grid2X2, ImageDown, Info, LoaderCircle, Maximize2, MousePointer2,
   RotateCcw, Save, Settings2, Sparkles, Upload,
 } from 'lucide-react';
@@ -31,6 +32,19 @@ function fmt(n: number) { return Number.isFinite(n) ? Number(n.toPrecision(5)).t
 
 export default function App() {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
+  const [autoRender3D, setAutoRender3D] = useState(true);
+
+  const activeD = useMemo(() => {
+    if (config.dimension === '2D') return config.plotMode === 'cartesian' ? config.cartesian2DDomain : config.complex2DDomain;
+    return config.plotMode === 'cartesian' ? config.cartesian3DDomain : config.complex3DDomain;
+  }, [config.dimension, config.plotMode, config.cartesian2DDomain, config.complex2DDomain, config.cartesian3DDomain, config.complex3DDomain]);
+
+  const updateActiveDomain = useCallback((overrides: Partial<{ xmin: number; xmax: number; ymin: number; ymax: number }>) => {
+    setConfig(prev => {
+      const key = prev.dimension === '2D' ? (prev.plotMode === 'cartesian' ? 'cartesian2DDomain' : 'complex2DDomain') : (prev.plotMode === 'cartesian' ? 'cartesian3DDomain' : 'complex3DDomain');
+      return { ...prev, [key]: { ...prev[key], ...overrides } };
+    });
+  }, []);
   const [expression, setExpression] = useState(DEFAULT_CONFIG.expression);
   const [sample, setSample] = useState<RenderSample | null>(null);
   const [rendering, setRendering] = useState(false);
@@ -40,6 +54,7 @@ export default function App() {
   const [cameraView, setCameraView] = useState<CameraView>({ kind: 'default', key: 0 });
   const [details, setDetails] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [fitRequest, setFitRequest] = useState(0);
   const [cameraRestoreRequest, setCameraRestoreRequest] = useState(0);
   const loadInput = useRef<HTMLInputElement>(null);
@@ -50,14 +65,14 @@ export default function App() {
   const [exampleGroup, setExampleGroup] = useState('Complex');
   const [manualRender, setManualRender] = useState(false);
   const [domainStrs, setDomainStrs] = useState({
-    xmin: String(DEFAULT_CONFIG.domain.xmin),
-    xmax: String(DEFAULT_CONFIG.domain.xmax),
-    ymin: String(DEFAULT_CONFIG.domain.ymin),
-    ymax: String(DEFAULT_CONFIG.domain.ymax)
+    xmin: String(DEFAULT_CONFIG.complex3DDomain.xmin),
+    xmax: String(DEFAULT_CONFIG.complex3DDomain.xmax),
+    ymin: String(DEFAULT_CONFIG.complex3DDomain.ymin),
+    ymax: String(DEFAULT_CONFIG.complex3DDomain.ymax)
   });
 
   const update = <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => setConfig((c) => ({ ...c, [key]: value }));
-  const updateDomain = (key: keyof AppConfig['domain'], value: number) => setConfig((c) => ({ ...c, domain: { ...c.domain, [key]: value } }));
+  const updateDomain = (key: 'xmin' | 'xmax' | 'ymin' | 'ymax', value: number) => updateActiveDomain({ [key]: value });
   const updateResolution = (key: keyof AppConfig['resolution'], value: number) => setConfig((c) => ({ ...c, quality: 'Custom', resolution: { ...c.resolution, [key]: Math.max(16, Math.min(1024, value)) } }));
   const updateAxis = (key: keyof AppConfig['axes'], value: Mapping) => setConfig((c) => ({ ...c, axes: { ...c.axes, [key]: value } }));
   const updateColor = (key: keyof AppConfig['color'], value: AppConfig['color'][keyof AppConfig['color']]) => setConfig((c) => ({ ...c, color: { ...c.color, [key]: value } }));
@@ -72,12 +87,12 @@ export default function App() {
     const isCartesian = config.dimension === '2D' && config.plotMode === 'cartesian';
     const fmt = (v: number) => String(Number(v.toPrecision(5)));
     setDomainStrs({
-      xmin: fmt(config.domain.xmin),
-      xmax: fmt(config.domain.xmax),
-      ymin: fmt(isCartesian ? config.manualY.min : config.domain.ymin),
-      ymax: fmt(isCartesian ? config.manualY.max : config.domain.ymax)
+      xmin: fmt(activeD.xmin),
+      xmax: fmt(activeD.xmax),
+      ymin: fmt(isCartesian ? config.manualY.min : activeD.ymin),
+      ymax: fmt(isCartesian ? config.manualY.max : activeD.ymax)
     });
-  }, [config.domain.xmin, config.domain.xmax, config.domain.ymin, config.domain.ymax, config.manualY.min, config.manualY.max, config.dimension, config.plotMode]);
+  }, [activeD.xmin, activeD.xmax, activeD.ymin, activeD.ymax, config.manualY.min, config.manualY.max, config.dimension, config.plotMode]);
 
   const handleDomainChange = (key: 'xmin' | 'xmax' | 'ymin' | 'ymax', val: string) => {
     setDomainStrs(s => ({ ...s, [key]: val }));
@@ -96,21 +111,22 @@ export default function App() {
 
   const applyManualRender = () => {
     const isCartesian = config.dimension === '2D' && config.plotMode === 'cartesian';
-    const xmin = Number(domainStrs.xmin) || config.domain.xmin;
-    const xmax = Number(domainStrs.xmax) || config.domain.xmax;
-    const ymin = Number(domainStrs.ymin) || (isCartesian ? config.manualY.min : config.domain.ymin);
-    const ymax = Number(domainStrs.ymax) || (isCartesian ? config.manualY.max : config.domain.ymax);
+    const xmin = Number(domainStrs.xmin) || activeD.xmin;
+    const xmax = Number(domainStrs.xmax) || activeD.xmax;
+    const ymin = Number(domainStrs.ymin) || (isCartesian ? config.manualY.min : activeD.ymin);
+    const ymax = Number(domainStrs.ymax) || (isCartesian ? config.manualY.max : activeD.ymax);
 
     setConfig(c => {
-      const next = { ...c, domain: { ...c.domain, xmin, xmax } };
+      const d = c.dimension === '2D' ? (c.plotMode === 'cartesian' ? c.cartesian2DDomain : c.complex2DDomain) : (c.plotMode === 'cartesian' ? c.cartesian3DDomain : c.complex3DDomain);
+      const domainKey = c.dimension === '2D' ? (c.plotMode === 'cartesian' ? 'cartesian2DDomain' : 'complex2DDomain') : (c.plotMode === 'cartesian' ? 'cartesian3DDomain' : 'complex3DDomain');
+      const nextD = { ...d, xmin, xmax };
       if (isCartesian) {
-        next.fitMode = 'Manual';
-        next.manualY = { min: ymin, max: ymax };
+        return { ...c, [domainKey]: nextD, fitMode: 'Manual', manualY: { min: ymin, max: ymax } };
       } else {
-        next.domain.ymin = ymin;
-        next.domain.ymax = ymax;
+        nextD.ymin = ymin;
+        nextD.ymax = ymax;
+        return { ...c, [domainKey]: nextD };
       }
-      return next;
     });
   };
 
@@ -132,9 +148,9 @@ export default function App() {
       const pw = width - margin.l - margin.r;
       const ph = height - margin.t - margin.b;
 
-      let mouseDataX = config.domain.xmin + (config.domain.xmax - config.domain.xmin) / 2;
+      let mouseDataX = activeD.xmin + (activeD.xmax - activeD.xmin) / 2;
       if (xCanvas >= margin.l && xCanvas <= width - margin.r) {
-        mouseDataX = config.domain.xmin + (xCanvas - margin.l) / pw * (config.domain.xmax - config.domain.xmin);
+        mouseDataX = activeD.xmin + (xCanvas - margin.l) / pw * (activeD.xmax - activeD.xmin);
       }
 
       let mouseDataY = config.manualY.min + (config.manualY.max - config.manualY.min) / 2;
@@ -142,17 +158,16 @@ export default function App() {
         mouseDataY = config.manualY.max - (yCanvas - margin.t) / ph * (config.manualY.max - config.manualY.min);
       }
 
-      const newXmin = mouseDataX - (mouseDataX - config.domain.xmin) * zoomFactor;
-      const newXmax = mouseDataX + (config.domain.xmax - mouseDataX) * zoomFactor;
+      const newXmin = mouseDataX - (mouseDataX - activeD.xmin) * zoomFactor;
+      const newXmax = mouseDataX + (activeD.xmax - mouseDataX) * zoomFactor;
       const newYmin = mouseDataY - (mouseDataY - config.manualY.min) * zoomFactor;
       const newYmax = mouseDataY + (config.manualY.max - mouseDataY) * zoomFactor;
 
-      setConfig(c => ({
-        ...c,
-        fitMode: 'Manual',
-        domain: { ...c.domain, xmin: newXmin, xmax: newXmax },
-        manualY: { min: newYmin, max: newYmax }
-      }));
+      setConfig(c => {
+        const d = c.dimension === '2D' ? (c.plotMode === 'cartesian' ? c.cartesian2DDomain : c.complex2DDomain) : (c.plotMode === 'cartesian' ? c.cartesian3DDomain : c.complex3DDomain);
+        const domainKey = c.dimension === '2D' ? (c.plotMode === 'cartesian' ? 'cartesian2DDomain' : 'complex2DDomain') : (c.plotMode === 'cartesian' ? 'cartesian3DDomain' : 'complex3DDomain');
+        return { ...c, [domainKey]: { ...d, xmin: newXmin, xmax: newXmax }, manualY: { min: newYmin, max: newYmax } };
+      });
     };
 
     let isDragging = false;
@@ -183,17 +198,13 @@ export default function App() {
       const ph = height - margin.t - margin.b;
 
       setConfig(c => {
-        const xRange = c.domain.xmax - c.domain.xmin;
+        const d = c.dimension === '2D' ? (c.plotMode === 'cartesian' ? c.cartesian2DDomain : c.complex2DDomain) : (c.plotMode === 'cartesian' ? c.cartesian3DDomain : c.complex3DDomain);
+        const domainKey = c.dimension === '2D' ? (c.plotMode === 'cartesian' ? 'cartesian2DDomain' : 'complex2DDomain') : (c.plotMode === 'cartesian' ? 'cartesian3DDomain' : 'complex3DDomain');
+        const xRange = d.xmax - d.xmin;
         const xDelta = (dx * dpr / pw) * xRange;
         const yRange = c.manualY.max - c.manualY.min;
         const yDelta = (dy * dpr / ph) * yRange;
-
-        return {
-          ...c,
-          fitMode: 'Manual',
-          domain: { ...c.domain, xmin: c.domain.xmin - xDelta, xmax: c.domain.xmax - xDelta },
-          manualY: { min: c.manualY.min + yDelta, max: c.manualY.max + yDelta }
-        };
+        return { ...c, fitMode: 'Manual', [domainKey]: { ...d, xmin: d.xmin - xDelta, xmax: d.xmax - xDelta }, manualY: { min: c.manualY.min + yDelta, max: c.manualY.max + yDelta } };
       });
     };
 
@@ -215,7 +226,7 @@ export default function App() {
       el.removeEventListener('pointerup', onPointerUp);
       el.removeEventListener('pointercancel', onPointerUp);
     };
-  }, [config.dimension, config.plotMode, config.domain, config.manualY]);
+  }, [config.dimension, config.plotMode, activeD, config.manualY]);
 
   const requestFit = () => { setFitRequest((value) => value + 1); setCameraView((view) => ({ kind: 'default', key: view.key + 1 })); };
 
@@ -237,8 +248,8 @@ export default function App() {
     let jobId = 1;
     const post = (resolution: number, resolutionY: number) => worker.postMessage({
       id: jobId++, expression: source, mode,
-      xmin: config.domain.xmin, xmax: config.domain.xmax,
-      ymin: config.domain.ymin, ymax: config.domain.ymax, resolution, resolutionY,
+      xmin: activeD.xmin, xmax: activeD.xmax,
+      ymin: activeD.ymin, ymax: activeD.ymax, resolution, resolutionY,
       enhance: mode === 'cartesian' && config.display.asymptoteEnhancement,
     });
     worker.onmessage = (event: MessageEvent<SampleMessage>) => {
@@ -246,7 +257,7 @@ export default function App() {
       if (message.type === 'error') {
         setError(message.message.replace(/^Error: ?/, '')); setStatus('Expression error'); setRendering(false); worker.terminate(); workerRef.current = null; return;
       }
-      const frame: RenderSample = { ...message, mode, domain: { ...config.domain }, expression: source, dataKey: JSON.stringify([source, config.domain]) };
+      const frame: RenderSample = { ...message, mode, domain: { ...activeD }, expression: source, dataKey: JSON.stringify([source, activeD]) };
       setSample(frame);
       if (stage === 'preview' && (finalResolution.x !== previewResolution.x || finalResolution.y !== previewResolution.y)) {
         stage = 'final'; setStatus('Refining visualization…'); post(finalResolution.x, finalResolution.y);
@@ -257,13 +268,14 @@ export default function App() {
     };
     worker.onerror = () => { setError('The expression could not be evaluated. Check the syntax and try again.'); setStatus('Expression error'); setRendering(false); worker.terminate(); workerRef.current = null; };
     post(previewResolution.x, previewResolution.y);
-  }, [expression, config.dimension, config.plotMode, config.quality, config.domain, config.resolution, config.display.asymptoteEnhancement]);
+  }, [expression, config.dimension, config.plotMode, config.quality, activeD, config.resolution, config.display.asymptoteEnhancement]);
 
   // Every input change starts a new job. Cleanup terminates stale work immediately.
   useEffect(() => {
+    if (config.dimension === '3D' && !autoRender3D) return;
     const timer = window.setTimeout(() => render(), 140);
     return () => { window.clearTimeout(timer); workerRef.current?.terminate(); workerRef.current = null; };
-  }, [render]);
+  }, [render, config.dimension, autoRender3D]);
 
   const compiled = useMemo(() => {
     try { return math.parse(normalizeExpression(expression)).compile(); } catch { return null; }
@@ -317,7 +329,7 @@ export default function App() {
   };
 
   const activeExamples = EXAMPLES.filter((e) => e.group === exampleGroup);
-  const currentDataKey = JSON.stringify([expression, config.domain]);
+  const currentDataKey = JSON.stringify([expression, activeD]);
   const baseDensity = config.quality === 'Custom'
     ? config.resolution
     : { x: config.dimension === '3D' ? QUALITY[config.quality].surface : config.plotMode === 'cartesian' ? Math.max(400, QUALITY[config.quality].domain) : QUALITY[config.quality].domain, y: config.dimension === '3D' ? QUALITY[config.quality].surface : config.plotMode === 'cartesian' ? 1 : QUALITY[config.quality].domain };
@@ -328,6 +340,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark"><Activity size={17} strokeWidth={2.4} /></div><div><strong>Complex Studio</strong><span>MATHEMATICAL VISUALIZER</span></div></div>
       <div className="topbar-center"><span className="live-dot" /> INTERACTIVE LAB <span className="topbar-divider" /> <span className="topbar-muted">COMPLEX ANALYSIS</span></div>
       <div className="top-actions">
+          <Auth />
         <button className="icon-btn" title="Save Project (.cstudio)" aria-label="Save Project" onClick={save}><Save size={15} /></button>
         <button className="icon-btn" title="Open Project (.cstudio or legacy JSON)" aria-label="Open Project" onClick={() => loadInput.current?.click()}><Upload size={15} /></button>
         <button className="icon-btn" title="Export sample data as CSV" onClick={exportCsv}><Download size={15} /></button>
@@ -345,7 +358,18 @@ export default function App() {
             <label className="field-label" htmlFor="function-input">f(z) <span>COMPLEX → COMPLEX</span></label>
             <MathEditor value={expression} onChange={setExpression} onEnter={() => void render()} />
             {error && <div className="error-message"><Info size={13} /> <span>{error}</span></div>}
-            <div className="syntax-hint">Supports <b>^</b> powers · <b>i</b> imaginary unit · <b>π</b> constant</div>
+
+              {config.dimension === '3D' && (
+                <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', cursor: 'pointer', color: '#8895a7' }}>
+                    <input type="checkbox" checked={autoRender3D} onChange={(e) => setAutoRender3D(e.target.checked)} />
+                    Automatic rendering
+                  </label>
+                  {!autoRender3D && (
+                    <button style={{ alignSelf: 'flex-start', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: '4px', padding: '6px 12px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold' }} onClick={() => void render()}>Render 3D</button>
+                  )}
+                </div>
+              )}
             <div className="examples-label"><span>EXAMPLES</span><div className="segmented mini-segments"><button className={exampleGroup === 'Complex' ? 'selected' : ''} onClick={() => setExampleGroup('Complex')}>Complex</button><button className={exampleGroup === 'Real' ? 'selected' : ''} onClick={() => setExampleGroup('Real')}>Real</button></div></div>
             <div className="example-chips">{activeExamples.map((item) => <button key={item.expression} title={item.label} className={expression === item.expression ? 'active' : ''} onClick={() => applyExample(item.expression)}><MathStatic expression={item.expression} /></button>)}</div>
           </section>
@@ -363,7 +387,7 @@ export default function App() {
           </section>
 
           <section className="control-section">
-            <div className="section-heading"><span className="section-index">03</span><span>DOMAIN</span><button className="reset-domain" title="Reset domain" onClick={() => update('domain', DEFAULT_CONFIG.domain)}><RotateCcw size={13} /></button></div>
+            <div className="section-heading"><span className="section-index">03</span><span>DOMAIN</span><button className="reset-domain" title="Reset domain" onClick={() => updateActiveDomain(DEFAULT_CONFIG.complex3DDomain)}><RotateCcw size={13} /></button></div>
             <div className="domain-grid">
               {config.dimension === '2D' && config.plotMode === 'cartesian' ? (
                 <><span className="domain-name">X</span><input aria-label="X minimum" type="number" step="0.5" value={domainStrs.xmin} onChange={(e) => handleDomainChange('xmin', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { applyManualRender(); void render(); } }} /><span className="domain-to">to</span><input aria-label="X maximum" type="number" step="0.5" value={domainStrs.xmax} onChange={(e) => handleDomainChange('xmax', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { applyManualRender(); void render(); } }} /><span className="domain-name">Y</span><input aria-label="Y minimum" type="number" step="0.5" value={domainStrs.ymin} onChange={(e) => handleDomainChange('ymin', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { applyManualRender(); void render(); } }} /><span className="domain-to">to</span><input aria-label="Y maximum" type="number" step="0.5" value={domainStrs.ymax} onChange={(e) => handleDomainChange('ymax', e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { applyManualRender(); void render(); } }} /></>
@@ -413,22 +437,22 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="viewport-shell">
+      <main className={`viewport-shell ${expanded ? 'viewport-expanded' : ''}`}>
         <div className="viewport-toolbar"><div className="viewport-title"><span className="viewport-symbol">{config.dimension === '3D' ? 'ℂ' : 'ℝ'}</span><div><strong>{config.dimension === '3D' ? 'Complex surface' : config.plotMode === 'cartesian' ? 'Cartesian graph' : config.plotMode === 'vector' ? 'Complex vector field' : 'Complex domain'}</strong><span>{expression || 'No function'} <b>·</b> {config.dimension === '3D' ? `${QUANTITIES.find((q) => q.value === config.axes.x)?.label} × ${QUANTITIES.find((q) => q.value === config.axes.y)?.label} → ${QUANTITIES.find((q) => q.value === config.axes.z)?.label}` : config.plotMode}</span></div></div>
-          <div className="toolbar-right"><span className={`render-state ${rendering ? 'is-rendering' : ''}`}>{rendering ? <LoaderCircle size={13} className="spin" /> : <span className="state-check"><Check size={10} /></span>}{status}</span><button className="fit-btn" title="Fit the current visualization using the selected fit policy" onClick={requestFit}><Maximize2 size={14} /><span>Fit view</span></button></div>
+          <div className="toolbar-right"><span className={`render-state ${rendering ? 'is-rendering' : ''}`}>{rendering ? <LoaderCircle size={13} className="spin" /> : <span className="state-check"><Check size={10} /></span>}{status}</span><button className="fit-btn" title={expanded ? "Restore viewport" : "Expand viewport"} onClick={() => setExpanded(!expanded)}>{expanded ? <Shrink size={14} /> : <Expand size={14} />}<span>{expanded ? 'Restore' : 'Fullscreen'}</span></button><button className="fit-btn" title="Fit the current visualization using the selected fit policy" onClick={requestFit}><Maximize2 size={14} /><span>Fit view</span></button></div>
         </div>
         <div className="viewport-content">
           <div className="render-area" ref={renderAreaRef}>
-            {config.dimension === '3D' ? <Surface3D sample={sample?.mode === 'surface' ? sample : null} axes={config.axes} color={config.color} display={config.display} camera={config.camera} projection={config.projection} cameraView={cameraView} fitMode={config.fitMode} manualCameraDistance={config.manualCameraDistance} dataKey={currentDataKey} fitRequest={fitRequest} cameraRestoreRequest={cameraRestoreRequest} onCamera={(camera) => update('camera', camera)} onInspect={inspect} onLeave={() => setHover(null)} onReset={requestFit} onCapture={(fn) => { surfaceCaptureRef.current = fn; }} /> : <Plot2D ref={canvasRef} sample={sample && sample.mode !== 'surface' ? sample : null} plotMode={config.plotMode} color={config.color} display={config.display} fitMode={config.fitMode} manualY={config.manualY} viewDomain={config.domain} onInspect={inspect} onLeave={() => setHover(null)} />}
+            {config.dimension === '3D' ? <Surface3D sample={sample?.mode === 'surface' ? sample : null} axes={config.axes} color={config.color} display={config.display} camera={config.camera} projection={config.projection} cameraView={cameraView} fitMode={config.fitMode} manualCameraDistance={config.manualCameraDistance} dataKey={currentDataKey} fitRequest={fitRequest} cameraRestoreRequest={cameraRestoreRequest} onCamera={(camera) => update('camera', camera)} onInspect={inspect} onLeave={() => setHover(null)} onReset={() => requestFit()} onCapture={(fn) => { surfaceCaptureRef.current = fn; }} /> : <Plot2D ref={canvasRef} sample={sample && sample.mode !== 'surface' ? sample : null} plotMode={config.plotMode} color={config.color} display={config.display} fitMode={config.fitMode} manualY={config.manualY} viewDomain={activeD} onInspect={inspect} onLeave={() => setHover(null)} />}
             {error && <div className="render-error"><div className="error-orbit">!</div><strong>Unable to render expression</strong><span>{error}</span><button onClick={() => { setError(''); void render(); }}>Try again</button></div>}
             {!sample && !error && <div className="render-loading"><LoaderCircle size={22} className="spin" /><span>Preparing your visualization</span></div>}
             {((config.dimension === '2D' && config.display.show2DLegend && config.plotMode !== 'cartesian') || (config.dimension === '3D' && config.display.show3DLegend)) && <div className="legend-panel"><div className="legend-head"><span>DOMAIN COLORING</span><span className="legend-circled">i</span></div><div className="phase-wheel"><div className="phase-wheel-center">arg<br /><small>f(z)</small></div></div><div className="legend-caption"><span>−π</span><div className="magnitude-ramp" /><span>π</span></div><div className="magnitude-legend"><span>0</span><div className="mag-bar" /><span>∞</span></div><div className="legend-foot"><span>Hue = phase</span><span>Lightness = magnitude</span></div></div>}
             {hover && <div className="inspect-card"><div className="inspect-head"><MousePointer2 size={12} /><span>POINT INSPECTOR</span></div><div className="inspect-row"><span>z</span><strong>{fmt(hover.x)} {hover.y < 0 ? '−' : '+'} {fmt(Math.abs(hover.y))}i</strong></div><div className="inspect-row"><span>f(z)</span><strong>{fmt(hover.re)} {hover.im < 0 ? '−' : '+'} {fmt(Math.abs(hover.im))}i</strong></div><div className="inspect-separator" /><div className="inspect-pairs"><div><span>MAGNITUDE</span><strong>{fmt(magnitude)}</strong></div><div><span>ARGUMENT</span><strong>{fmt(phase)} <small>rad</small></strong></div></div></div>}
             <div className="viewport-bottom-left"><span className="bottom-chip"><Eye size={12} /> {config.dimension === '3D' ? 'Orbit · Pan · Zoom' : 'Move cursor to inspect'}</span><span className="bottom-chip"><span className="green-dot" /> {config.quality}</span></div>
-            {config.dimension === '3D' && <div className="camera-tools"><button title="Top view" onClick={() => setCameraView({ kind: 'top', key: cameraView.key + 1 })}>TOP</button><button title="Front view" onClick={() => setCameraView({ kind: 'front', key: cameraView.key + 1 })}>FRONT</button><button title="Side view" onClick={() => setCameraView({ kind: 'side', key: cameraView.key + 1 })}>SIDE</button><button title="Toggle perspective / orthographic projection" className="projection-btn" onClick={() => update('projection', config.projection === 'perspective' ? 'orthographic' : 'perspective')}>{config.projection === 'perspective' ? 'PERSP' : 'ORTHO'}</button><span /><button title="Reset view" onClick={() => setCameraView({ kind: 'default', key: cameraView.key + 1 })}><RotateCcw size={13} /></button></div>}
+            {config.dimension === '3D' && <div className="camera-tools"><button title="Top view" onClick={() => setCameraView({ kind: 'top', key: cameraView.key + 1 })}>TOP</button><button title="Front view" onClick={() => setCameraView({ kind: 'front', key: cameraView.key + 1 })}>FRONT</button><button title="Side view" onClick={() => setCameraView({ kind: 'side', key: cameraView.key + 1 })}>SIDE</button><span /><button title="Toggle perspective / orthographic projection" className="projection-btn" onClick={() => update('projection', config.projection === 'perspective' ? 'orthographic' : 'perspective')}>{config.projection === 'perspective' ? 'PERSP' : 'ORTHO'}</button><span /><button title="Reset view" onClick={() => setCameraView({ kind: 'default', key: cameraView.key + 1 })}><RotateCcw size={13} /></button></div>}
           </div>
         </div>
-        <footer className="statusbar"><span><span className="green-dot" /> {rendering ? 'Computing samples in background' : 'Ready'}</span><span className="status-right"><span>ℂ → ℂ</span><b>·</b><span>{sample ? `${sample.resolution.toLocaleString()} × ${sample.rows.toLocaleString()}` : '—'}</span><b>·</b><span>{config.dimension === '3D' ? 'WebGL' : 'Canvas 2D'}</span><button title="Expand viewport"><Expand size={13} /></button></span></footer>
+        <footer className="statusbar"><span><span className="green-dot" /> {rendering ? 'Computing samples in background' : 'Ready'}</span><span className="status-right"><span>ℂ → ℂ</span><b>·</b><span>{sample ? `${sample.resolution.toLocaleString()} × ${sample.rows.toLocaleString()}` : '—'}</span><b>·</b><span>{config.dimension === '3D' ? 'WebGL' : 'Canvas 2D'}</span></span></footer>
       </main>
     </div>
     {infoOpen && <InformationPanel onClose={() => setInfoOpen(false)} />}

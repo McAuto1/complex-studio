@@ -237,3 +237,8 @@ input[type=range] { accent-color: #83dcbd; }
 .example-chips button mi { font-style: italic; }
 .example-chips button mn, .example-chips button mo, .example-chips button mi { padding: 0 0.5px; }
 .math-placeholder { color: #586376; opacity: 0.6; pointer-events: none; }
+
+.sqrt-radicand { position: relative; top: 0.18em; }
+
+
+.viewport-expanded { position: fixed; inset: 0; z-index: 1000; background: #0c0f15; }

@@ -23,12 +23,25 @@ export type DisplayOptions = {
   asymptoteEnhancement: boolean;
 };
 
+export type Complex3DFunction = {
+  id: string;
+  expression: string;
+  visible: boolean;
+  colorMode: 'solid' | 'domain';
+  solidColor: string;
+};
+
 export type AppConfig = {
+  complex3DFunctions: Complex3DFunction[];
+  activeComplex3DFunctionId: string;
   expression: string;
   dimension: Dimension;
   plotMode: PlotMode;
   quality: Quality;
-  domain: { xmin: number; xmax: number; ymin: number; ymax: number };
+  cartesian2DDomain: { xmin: number; xmax: number; ymin: number; ymax: number };
+  complex2DDomain: { xmin: number; xmax: number; ymin: number; ymax: number };
+  cartesian3DDomain: { xmin: number; xmax: number; ymin: number; ymax: number };
+  complex3DDomain: { xmin: number; xmax: number; ymin: number; ymax: number };
   resolution: { x: number; y: number };
   projection: Projection;
   axes: { x: Mapping; y: Mapping; z: Mapping };
@@ -40,9 +53,16 @@ export type AppConfig = {
   camera: SavedCamera;
 };
 
+const DEFAULT_DOMAIN = { xmin: -3, xmax: 3, ymin: -3, ymax: 3 };
+
 export const DEFAULT_CONFIG: AppConfig = {
+  complex3DFunctions: [{ id: 'f1', expression: 'sin(z)', visible: true, colorMode: 'domain', solidColor: '#3b82f6' }],
+  activeComplex3DFunctionId: 'f1',
   expression: 'sin(z)', dimension: '3D', plotMode: 'cartesian', quality: 'Medium',
-  domain: { xmin: -3, xmax: 3, ymin: -3, ymax: 3 },
+  cartesian2DDomain: { ...DEFAULT_DOMAIN },
+  complex2DDomain: { ...DEFAULT_DOMAIN },
+  cartesian3DDomain: { ...DEFAULT_DOMAIN },
+  complex3DDomain: { ...DEFAULT_DOMAIN },
   resolution: { x: 128, y: 128 }, projection: 'perspective',
   axes: { x: 'inputRe', y: 'inputIm', z: 'outputRe' },
   color: { contrast: 1.1, saturation: 0.9, logMagnitude: true, contours: false },
@@ -93,16 +113,34 @@ function readCamera(value: unknown): SavedCamera {
   return offset ? { offset } : null;
 }
 
-function normalizeConfig(source: RecordValue, cameraOverride?: unknown): AppConfig {
-  const domainInput = isRecord(source.domain) ? source.domain : {};
-  const domainCandidate = {
-    xmin: clamp(numberOr(domainInput.xmin, DEFAULT_CONFIG.domain.xmin), -1e9, 1e9),
-    xmax: clamp(numberOr(domainInput.xmax, DEFAULT_CONFIG.domain.xmax), -1e9, 1e9),
-    ymin: clamp(numberOr(domainInput.ymin, DEFAULT_CONFIG.domain.ymin), -1e9, 1e9),
-    ymax: clamp(numberOr(domainInput.ymax, DEFAULT_CONFIG.domain.ymax), -1e9, 1e9),
+function readDomain(input: unknown, fallback: { xmin: number, xmax: number, ymin: number, ymax: number }) {
+  const source = isRecord(input) ? input : {};
+  const candidate = {
+    xmin: clamp(numberOr(source.xmin, fallback.xmin), -1e9, 1e9),
+    xmax: clamp(numberOr(source.xmax, fallback.xmax), -1e9, 1e9),
+    ymin: clamp(numberOr(source.ymin, fallback.ymin), -1e9, 1e9),
+    ymax: clamp(numberOr(source.ymax, fallback.ymax), -1e9, 1e9),
   };
-  const domain = domainCandidate.xmin < domainCandidate.xmax && domainCandidate.ymin < domainCandidate.ymax
-    ? domainCandidate : DEFAULT_CONFIG.domain;
+  return candidate.xmin < candidate.xmax && candidate.ymin < candidate.ymax ? candidate : { ...fallback };
+}
+
+function normalizeConfig(source: RecordValue, cameraOverride?: unknown): AppConfig {
+  const legacyExpression = typeof source.expression === 'string' ? source.expression : DEFAULT_CONFIG.expression;
+  const complex3DFunctions = Array.isArray(source.complex3DFunctions) ? source.complex3DFunctions : [{
+    id: 'f1',
+    expression: legacyExpression,
+    visible: true,
+    colorMode: 'domain',
+    solidColor: '#3b82f6'
+  }];
+  const activeComplex3DFunctionId = typeof source.activeComplex3DFunctionId === 'string' ? source.activeComplex3DFunctionId : complex3DFunctions[0].id;
+  const legacyDomain = readDomain(source.domain, DEFAULT_DOMAIN);
+
+  const cartesian2DDomain = readDomain(source.cartesian2DDomain ?? source.domain, legacyDomain);
+  const complex2DDomain = readDomain(source.complex2DDomain ?? source.domain, legacyDomain);
+  const cartesian3DDomain = readDomain(source.cartesian3DDomain ?? source.domain, legacyDomain);
+  const complex3DDomain = readDomain(source.complex3DDomain ?? source.domain, legacyDomain);
+
   const resolutionInput = isRecord(source.resolution) ? source.resolution : {};
   const resolution = {
     x: Math.round(clamp(numberOr(resolutionInput.x, DEFAULT_CONFIG.resolution.x), 16, 1024)),
@@ -135,10 +173,12 @@ function normalizeConfig(source: RecordValue, cameraOverride?: unknown): AppConf
   const camera = readCamera(cameraOverride === undefined ? source.camera : cameraOverride);
   return {
     expression,
+    complex3DFunctions,
+    activeComplex3DFunctionId,
     dimension: pick(source.dimension, ['2D', '3D'] as const, DEFAULT_CONFIG.dimension),
     plotMode: pick(source.plotMode, ['cartesian', 'domain', 'magnitude', 'phase', 'contours', 'vector'] as const, DEFAULT_CONFIG.plotMode),
     quality: pick(source.quality, ['Very Low', 'Low', 'Medium', 'High', 'Very High', 'Custom'] as const, DEFAULT_CONFIG.quality),
-    domain, resolution,
+    cartesian2DDomain, complex2DDomain, cartesian3DDomain, complex3DDomain, resolution,
     projection: pick(source.projection, ['perspective', 'orthographic'] as const, DEFAULT_CONFIG.projection),
     axes: {
       x: pick(axesInput.x, ['inputRe', 'inputIm', 'outputRe', 'outputIm', 'magnitude', 'phase'] as const, DEFAULT_CONFIG.axes.x),
