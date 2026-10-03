@@ -46,28 +46,30 @@ export function normalizeExpression(source: string): string {
   return text;
 }
 
-export const EXAMPLES = [
+export type Example = { label: string, expression: string, group: 'Complex' | 'Real', highlight?: boolean, title?: string, description?: string };
+export const EXAMPLES: Example[] = [
+  { label: 'A strange power', title: 'A power that powers itself', description: 'Watch an unusual power create intricate structure.', expression: 'z^z', group: 'Complex', highlight: true },
+  { label: 'A branching surface', title: 'A branching function', description: 'See how a square root behaves across the complex plane.', expression: 'sqrt(z)', group: 'Complex', highlight: true },
+  { label: 'Infinite spikes', title: 'Where the surface blows up', description: 'Explore the dramatic behavior around its singularities.', expression: '1/(z^2+1)', group: 'Complex', highlight: true },
+  { label: 'A wave in complex space', title: 'A wave in complex space', description: 'A familiar sine function behaves very differently here.', expression: 'sin(z)', group: 'Complex', highlight: true },
   { label: 'Identity', expression: 'z', group: 'Complex' },
-  { label: 'z', expression: 'z^2', group: 'Complex' },
-  { label: 'z', expression: 'z^3', group: 'Complex' },
-  { label: 'z to the z', expression: 'z^z', group: 'Complex' },
   { label: 'Reciprocal', expression: '1/z', group: 'Complex' },
-  { label: 'Two poles', expression: '1/(z^2+1)', group: 'Complex' },
-  { label: 'Square root', expression: 'sqrt(z)', group: 'Complex' },
+  { label: 'z to the 2', expression: 'z^2', group: 'Complex' },
+  { label: 'z to the 3', expression: 'z^3', group: 'Complex' },
   { label: 'Exponential', expression: 'exp(z)', group: 'Complex' },
   { label: 'Exp squared', expression: 'exp(z^2)', group: 'Complex' },
   { label: 'Logarithm', expression: 'log(z)', group: 'Complex' },
-  { label: 'Sine', expression: 'sin(z)', group: 'Complex' },
   { label: 'Cosine', expression: 'cos(z)', group: 'Complex' },
   { label: 'Tangent', expression: 'tan(z)', group: 'Complex' },
   { label: 'Sinh', expression: 'sinh(z)', group: 'Complex' },
   { label: 'Cosh', expression: 'cosh(z)', group: 'Complex' },
-  { label: 'Tanh', expression: 'tanh(z)', group: 'Complex' },
-  { label: 'Gamma', expression: 'gamma(z)', group: 'Complex' },
-  { label: 'Sinc', expression: 'sin(z)/z', group: 'Complex' },
+  { label: 'Gamma function', expression: 'gamma(z)', group: 'Complex' },
+  { label: 'Absolute', expression: 'abs(z)', group: 'Complex' },
+  { label: 'Argument', expression: 'arg(z)', group: 'Complex' },
+  { label: 'Linear', expression: 'x', group: 'Real' },
   { label: 'Parabola', expression: 'x^2', group: 'Real' },
+  { label: 'Cubic', expression: 'x^3', group: 'Real' },
   { label: 'Sine wave', expression: 'sin(x)', group: 'Real' },
-  { label: 'Product wave', expression: 'sin(x*y)', group: 'Real' },
-  { label: 'Saddle', expression: 'x^2-y^2', group: 'Real' },
-  { label: 'Radial wave', expression: 'sin(sqrt(x^2+y^2))', group: 'Real' },
+  { label: 'Gaussian', expression: 'exp(-x^2)', group: 'Real' },
+  { label: 'Sinc function', expression: 'sin(x)/x', group: 'Real' },
 ];
