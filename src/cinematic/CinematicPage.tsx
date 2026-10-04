@@ -5,6 +5,7 @@ import { Navigation } from '../Navigation';
 import { Auth } from '../Auth';
 import { MathStatic } from '../MathEditor';
 import CinematicScene from './CinematicScene';
+import { CANONICAL_RIEMANN_ZETA_CONFIG } from './zetaCanonicalConfig';
 
 const EXAMPLES = ['z^z', 'sqrt(z)', 'sin(z)', '1/(z^2+1)', 'exp(z)', 'ζ(z)'];
 
@@ -301,82 +302,73 @@ export default function CinematicPage() {
 
   const handleZetaPreset = () => {
     setIsRendering(true);
-    const targetExpr = 'zeta(z)';
-    const targetXMin = '-7';
-    const targetXMax = '0.501';
-    const targetZMin = '-65';
-    const targetZMax = '65';
-    const targetHeightMode = 'mag' as const;
-    const targetHeightScale = 1;
-    const targetResX = 463;
-    const targetResZ = 8000;
-    const targetHeightLimit = 20;
+    const { mathematical: m, presentation: p, appearance: a, camera: cam } = CANONICAL_RIEMANN_ZETA_CONFIG;
 
-    setExpression(targetExpr);
-    setXMin(targetXMin);
-    setXMax(targetXMax);
-    setZMin(targetZMin);
-    setZMax(targetZMax);
-    setHeightMode(targetHeightMode);
-    setHeightScale(targetHeightScale);
-    setResolution(100);
-    setUseCustomRes(true);
-    setCustomResX(targetResX);
-    setCustomResZ(targetResZ);
-    setHeightLimitMode('Custom');
-    setCustomHeightLimit(targetHeightLimit);
+    setExpression(m.expression);
+    setXMin(String(m.domain.xMin));
+    setXMax(String(m.domain.xMax));
+    setZMin(String(m.domain.zMin));
+    setZMax(String(m.domain.zMax));
+    setHeightMode(m.heightMode);
+    setHeightScale(m.heightScale);
+    setResolution(m.resolution);
+    setUseCustomRes(m.useCustomRes);
+    setCustomResX(m.customResX);
+    setCustomResZ(m.customResZ);
+    setHeightLimitMode(m.heightLimitMode);
+    setCustomHeightLimit(m.customHeightLimit);
 
-    setShowGrid(true);
-    setShowAxes(true);
-    setShowNumericLabels(true);
-    setShowAxisLabels(false);
-    setLabelsAlwaysVisible(false);
-    setShowWrappedGrid(true);
-    setWrappedGridDensity('High');
-    setShowCriticalLine(true);
-    setShowCriticalStrip(true);
-    setShowKnownZeros(false);
-    setNumericLabelSize(0.014);
-    setAxisTitleSize(0.012);
-    setTickSpacingMode('auto');
-    setManualTickStep(1);
-    setAxisRatioMode('custom');
-    setCustomRatio({ re: 2, height: 0.5, im: 0.25 });
-    setGroundMagnitudeAtZero(true);
+    setShowGrid(p.showGrid);
+    setShowAxes(p.showAxes);
+    setShowNumericLabels(p.showNumericLabels);
+    setShowAxisLabels(p.showAxisLabels);
+    setLabelsAlwaysVisible(p.labelsAlwaysVisible);
+    setShowWrappedGrid(p.showWrappedGrid);
+    setWrappedGridDensity(p.wrappedGridDensity);
+    setShowCriticalLine(p.showCriticalLine);
+    setShowCriticalStrip(p.showCriticalStrip);
+    setShowKnownZeros(p.showKnownZeros);
+    setNumericLabelSize(p.numericLabelSize);
+    setAxisTitleSize(p.axisTitleSize);
+    setTickSpacingMode(p.tickSpacingMode);
+    setManualTickStep(p.manualTickStep);
+    setAxisRatioMode(p.axisRatioMode);
+    setCustomRatio(p.customRatio);
+    setGroundMagnitudeAtZero(p.groundMagnitudeAtZero);
 
-    setWireframe(false);
-    setSurfaceColor('#0f7a7a');
-    setColorMode('palette');
-    setLightBrightness(0.7);
-    setAtmosphere(0.35);
-    setCameraMode('perspective');
+    setWireframe(a.wireframe);
+    setSurfaceColor(a.surfaceColor);
+    setColorMode(a.colorMode);
+    setLightBrightness(a.lightBrightness);
+    setAtmosphere(a.atmosphere);
+    setCameraMode(cam.mode);
 
     setRenderedConfig({
-      expression: targetExpr,
-      heightMode: targetHeightMode,
-      heightScale: targetHeightScale,
-      resolutionX: targetResX,
-      resolutionZ: targetResZ,
-      heightLimitMode: 'Custom',
-      customHeightLimit: targetHeightLimit,
-      surfaceColor: '#0f7a7a',
-      colorMode: 'palette',
-      lightBrightness: 0.7,
-      atmosphere: 0.35,
-      showWrappedGrid: true,
-      wrappedGridDensity: 'High',
-      showCriticalLine: true,
-      showCriticalStrip: true,
-      showKnownZeros: false,
-      domain: { xMin: -7, xMax: 0.501, zMin: -65, zMax: 65 }
+      expression: m.expression,
+      heightMode: m.heightMode,
+      heightScale: m.heightScale,
+      resolutionX: m.customResX,
+      resolutionZ: m.customResZ,
+      heightLimitMode: m.heightLimitMode,
+      customHeightLimit: m.customHeightLimit,
+      surfaceColor: a.surfaceColor,
+      colorMode: a.colorMode,
+      lightBrightness: a.lightBrightness,
+      atmosphere: a.atmosphere,
+      showWrappedGrid: p.showWrappedGrid,
+      wrappedGridDensity: p.wrappedGridDensity,
+      showCriticalLine: p.showCriticalLine,
+      showCriticalStrip: p.showCriticalStrip,
+      showKnownZeros: p.showKnownZeros,
+      domain: m.domain
     });
 
     setTimeout(() => {
       sceneRef.current?.setCameraState({
-        mode: 'perspective',
-        position: { x: 38.71247034362551, y: 3.6612697441959243, z: 23.744254450895912 },
-        target: { x: -4.13096552313472, y: 1.210383630053239, z: 1.7711678695156614 },
-        zoom: 1
+        mode: cam.mode,
+        position: cam.position,
+        target: cam.target,
+        zoom: cam.zoom
       });
       setIsRendering(false);
     }, 60);

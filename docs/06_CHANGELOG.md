@@ -4,6 +4,29 @@ This document logs significant investigations, structural modifications, bug fix
 
 ---
 
+## 2026-10-04
+
+### Canonical Riemann Zeta Configuration Integration & Explorer Verification
+
+* **Type:** Architecture Hardening & Single Source of Truth
+* **Status:** `confirmed`
+
+#### What changed
+* Verified the active configuration reaching `CinematicScene` against the canonical `RiemmanZetaConfig.json`.
+* Resolved configuration discrepancy in documentation: the actual implementation was running the canonical configuration (Re [-7, 0.501], Im [-65, 65], resolution 463x8000, height limit 20, axis ratio [2, 0.5, 0.25], light 0.7, atmosphere 0.35, camera [38.71, 3.66, 23.74]), but prior reporting cited approximate values from legacy drafts.
+* Established `src/cinematic/zetaCanonicalConfig.ts` (`CANONICAL_RIEMANN_ZETA_CONFIG`) as the single source of truth across both `CinematicPage` (Render ζ(z) showcase) and `RiemannZetaPage` (`/riemann-zeta`), eliminating duplicated or drift-prone configuration literals.
+* Enhanced `CinematicScene` with an `initialCamera` prop to initialize OrbitControls and camera matrices synchronously on canvas mount.
+* Added safe node cleanup guard (`mount.contains(renderer.domElement)`) preventing DOM exception during fast re-renders.
+
+#### Files affected
+* `src/cinematic/zetaCanonicalConfig.ts`
+* `src/cinematic/CinematicScene.tsx`
+* `src/cinematic/CinematicPage.tsx`
+* `src/RiemannZetaPage.tsx`
+* `docs/06_CHANGELOG.md`
+
+---
+
 ## 2026-10-01
 
 ### 1.0.0 Feature Freeze / QoL Pass

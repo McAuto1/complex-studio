@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
 import CinematicPage from './cinematic/CinematicPage';
 import Calculator from './Calculator';
+import RiemannZetaPage from './RiemannZetaPage';
 import { useLocation, Link } from './router';
+import { usePageMeta } from './seo';
 import { Navigation } from './Navigation';
 import { Auth } from './Auth';
 import { Activity, Sparkles, Compass, Box, Layers, ArrowRight } from 'lucide-react';
 import { EXAMPLES } from './mathExpression';
 import { MathStatic } from './MathEditor';
 
-function SiteHeader() {
+export function SiteHeader() {
   return (
     <header className="site-header">
       <div className="site-brand">
@@ -28,7 +30,7 @@ function SiteHeader() {
   );
 }
 
-function SiteFooter() {
+export function SiteFooter() {
   return (
     <footer className="site-footer">
       <div className="footer-content">
@@ -262,12 +264,12 @@ function ExplorePage() {
               <h3>Riemann Zeta Function ζ(s)</h3>
               <p>The mathematical landscape at the heart of the million-dollar Riemann Hypothesis.</p>
               <div className="featured-actions">
-                <Link href="/cinematic" className="btn-primary hero-btn-cinematic">
-                  <span>Open ζ(z) in Cinematic</span>
+                <Link href="/riemann-zeta" className="btn-primary hero-btn-cinematic">
+                  <span>Explore ζ(s) in 3D</span>
                   <ArrowRight size={14} />
                 </Link>
-                <Link href="/calculator?expr=zeta(z)" className="btn-secondary">
-                  <span>Open in Calculator</span>
+                <Link href="/cinematic" className="btn-secondary">
+                  <span>Open in Cinematic</span>
                 </Link>
               </div>
             </div>
@@ -355,6 +357,7 @@ function AboutPage() {
 
 export default function App() {
   const [fullPath] = useLocation();
+  usePageMeta(fullPath);
   const pathname = fullPath.split('?')[0];
 
   if (pathname === '/' || pathname === '' || pathname === '/home') return <LandingPage />;
@@ -362,6 +365,7 @@ export default function App() {
   if (pathname === '/cinematic') return <CinematicPage />;
   if (pathname === '/about') return <AboutPage />;
   if (pathname === '/calculator') return <Calculator />;
+  if (pathname === '/riemann-zeta') return <RiemannZetaPage />;
 
   return <LandingPage />;
 }

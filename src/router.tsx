@@ -32,11 +32,12 @@ export function useLocation() {
   return [path, navigate] as const;
 }
 
-export function Link({ href, children, className }: { href: string, children: ReactNode, className?: string }) {
+export function Link({ href, children, className, title }: { href: string, children: ReactNode, className?: string, title?: string }) {
   return (
     <a 
       href={href} 
       className={className} 
+      title={title} 
       onClick={(e) => { 
         if (e.ctrlKey || e.metaKey) return;
         e.preventDefault(); 

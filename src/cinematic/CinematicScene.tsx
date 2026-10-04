@@ -13,7 +13,7 @@ export interface CinematicSceneRef {
   exportPNG: (w?: number, h?: number) => string | null;
 }
 
-interface SceneConfig {
+export interface SceneConfig {
   expression: string;
   heightMode: 'mag' | 'real' | 'imag';
   heightScale: number;
@@ -35,7 +35,7 @@ interface SceneConfig {
   showKnownZeros?: boolean;
 }
 
-interface CinematicSceneProps {
+export interface CinematicSceneProps {
   config: SceneConfig;
   cameraMode: 'perspective' | 'orthographic';
   wireframe: boolean;
@@ -50,6 +50,11 @@ interface CinematicSceneProps {
   manualTickStep: number;
   axisRatio: [number, number, number];
   groundMagnitudeAtZero: boolean;
+  initialCamera?: {
+    position?: { x: number; y: number; z: number };
+    target?: { x: number; y: number; z: number };
+    zoom?: number;
+  };
 }
 
 function createTextSprite(
@@ -123,7 +128,7 @@ function getTicks(min: number, max: number, count: number = 5, mode: 'auto' | 'm
   return ticks;
 }
 
-const CinematicScene = forwardRef<CinematicSceneRef, CinematicSceneProps>(function CinematicScene({ config, cameraMode, wireframe, showGrid, showAxes, showNumericLabels, showAxisLabels, labelsAlwaysVisible, numericLabelSize, axisTitleSize, tickSpacingMode, manualTickStep, axisRatio, groundMagnitudeAtZero }, ref) {
+const CinematicScene = forwardRef<CinematicSceneRef, CinematicSceneProps>(function CinematicScene({ config, cameraMode, wireframe, showGrid, showAxes, showNumericLabels, showAxisLabels, labelsAlwaysVisible, numericLabelSize, axisTitleSize, tickSpacingMode, manualTickStep, axisRatio, groundMagnitudeAtZero, initialCamera }, ref) {
   const mountRef = useRef<HTMLDivElement>(null);
 
   useImperativeHandle(ref, () => ({
@@ -429,6 +434,20 @@ const CinematicScene = forwardRef<CinematicSceneRef, CinematicSceneProps>(functi
     controls.dampingFactor = 0.1;
     controls.target.set(0, 0, 0);
 
+    if (initialCamera) {
+      if (initialCamera.position) {
+        camera.position.set(initialCamera.position.x, initialCamera.position.y, initialCamera.position.z);
+      }
+      if (initialCamera.target) {
+        controls.target.set(initialCamera.target.x, initialCamera.target.y, initialCamera.target.z);
+      }
+      if (initialCamera.zoom && camera instanceof THREE.OrthographicCamera) {
+        camera.zoom = initialCamera.zoom;
+      }
+      camera.updateProjectionMatrix();
+      controls.update();
+    }
+
     const ambient = new THREE.AmbientLight(0x1e2430, 0.6);
     scene.add(ambient);
 
@@ -518,7 +537,9 @@ const CinematicScene = forwardRef<CinematicSceneRef, CinematicSceneProps>(functi
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      mount.removeChild(renderer.domElement);
+      if (mount.contains(renderer.domElement)) {
+        mount.removeChild(renderer.domElement);
+      }
       geometry.dispose();
       material.dispose();
       renderer.dispose();
