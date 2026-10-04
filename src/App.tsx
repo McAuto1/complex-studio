@@ -7,6 +7,7 @@ import { Auth } from './Auth';
 import { Activity, Sparkles, Compass, Box, Layers, ArrowRight } from 'lucide-react';
 import { EXAMPLES } from './mathExpression';
 import { MathStatic } from './MathEditor';
+import { Analytics } from '@vercel/analytics/react';
 
 function SiteHeader() {
   return (
@@ -357,11 +358,11 @@ export default function App() {
   const [fullPath] = useLocation();
   const pathname = fullPath.split('?')[0];
 
-  if (pathname === '/' || pathname === '' || pathname === '/home') return <LandingPage />;
-  if (pathname === '/explore') return <ExplorePage />;
-  if (pathname === '/cinematic') return <CinematicPage />;
-  if (pathname === '/about') return <AboutPage />;
-  if (pathname === '/calculator') return <Calculator />;
+  if (pathname === '/' || pathname === '' || pathname === '/home') return <><LandingPage /><Analytics /></>;
+  if (pathname === '/explore') return <><ExplorePage /><Analytics /></>;
+  if (pathname === '/cinematic') return <><CinematicPage /><Analytics /></>;
+  if (pathname === '/about') return <><AboutPage /><Analytics /></>;
+  if (pathname === '/calculator') return <><Calculator /><Analytics /></>;
 
-  return <LandingPage />;
+  return <><LandingPage /><Analytics /></>;
 }
