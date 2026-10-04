@@ -1,7 +1,7 @@
 import { useState, useEffect, ReactNode } from 'react';
 
 const listeners = new Set<(path: string) => void>();
-let currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
+let currentPath = typeof window !== 'undefined' ? window.location.pathname + window.location.search : '/home';
 
 function notify() {
   listeners.forEach(fn => fn(currentPath));
@@ -9,7 +9,7 @@ function notify() {
 
 if (typeof window !== 'undefined') {
   window.addEventListener('popstate', () => {
-    currentPath = window.location.pathname;
+    currentPath = window.location.pathname + window.location.search;
     notify();
   });
 }

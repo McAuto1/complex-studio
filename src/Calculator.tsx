@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { all, create } from 'mathjs';
 import { Auth } from './Auth';
-import { Link } from './router';
+import { Link, useLocation } from './router';
+import { Navigation } from './Navigation';
 import {
   Activity, Box, Check, ChevronDown, CircleHelp, Code2, Download, Expand, Shrink,
   Eye, Grid2X2, ImageDown, Info, LoaderCircle, Maximize2, MousePointer2,
@@ -46,8 +47,17 @@ export default function Calculator() {
       return { ...prev, [key]: { ...prev[key], ...overrides } };
     });
   }, []);
-  const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-  const [expression, setExpression] = useState(params.get("expr") || DEFAULT_CONFIG.expression);
+  const [fullPath] = useLocation();
+  const searchStr = fullPath.includes('?') ? fullPath.slice(fullPath.indexOf('?')) : '';
+  const params = new URLSearchParams(searchStr);
+  const queryExpr = params.get("expr");
+  const [expression, setExpression] = useState(queryExpr || DEFAULT_CONFIG.expression);
+
+  useEffect(() => {
+    if (queryExpr && queryExpr !== expression) {
+      setExpression(queryExpr);
+    }
+  }, [queryExpr]);
   const [sample, setSample] = useState<RenderSample | null>(null);
   const [rendering, setRendering] = useState(false);
   const [error, setError] = useState('');
@@ -339,10 +349,20 @@ export default function Calculator() {
   const phase = hover ? Math.atan2(hover.im, hover.re) : 0;
   return <div className="app-shell">
     <header className="topbar">
-      <div className="brand"><Link href="/" className="brand-link"><div className="brand-mark"><Activity size={17} strokeWidth={2.4} /></div><div><strong>Complex Studio</strong><span>MATHEMATICAL VISUALIZER</span></div></Link></div>
-      <div className="topbar-center site-nav" style={{ gap: "20px" }}><Link href="/calculator" className="active">Calculator</Link><Link href="/about">About</Link></div>
+      <div className="brand">
+        <Link href="/home" className="brand-link">
+          <div className="brand-mark"><Activity size={17} strokeWidth={2.4} /></div>
+          <div className="brand-text">
+            <strong>Complex Studio</strong>
+            <span>MATHEMATICAL VISUALIZER</span>
+          </div>
+        </Link>
+      </div>
+      <div className="topbar-nav" style={{ marginLeft: '16px', display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <Navigation className="site-nav" />
+        <Auth />
+      </div>
       <div className="top-actions">
-          <Auth />
         <button className="icon-btn" title="Save Project (.cstudio)" aria-label="Save Project" onClick={save}><Save size={15} /></button>
         <button className="icon-btn" title="Open Project (.cstudio or legacy JSON)" aria-label="Open Project" onClick={() => loadInput.current?.click()}><Upload size={15} /></button>
         <button className="icon-btn" title="Export sample data as CSV" onClick={exportCsv}><Download size={15} /></button>
@@ -372,17 +392,8 @@ export default function Calculator() {
                   )}
                 </div>
               )}
-            <div className="examples-header"><h3>Things worth exploring</h3></div>
-              <div className="examples-grid">
-                {EXAMPLES.filter(e => e.highlight).map((item) => (
-                  <button key={item.expression} className={`example-card ${expression === item.expression ? 'active' : ''}`} onClick={() => applyExample(item.expression)}>
-                    <div className="example-card-math"><MathStatic expression={item.expression} /></div>
-                    <div className="example-card-title">{item.title}</div>
-                    {item.description && <div className="example-card-desc">{item.description}</div>}
-                  </button>
-                ))}
-              </div>
-              <div className="examples-label" style={{ marginTop: '16px' }}>
+
+              <div className="examples-label" style={{ marginTop: '12px' }}>
                 <span>MORE EXAMPLES</span>
                 <div className="segmented mini-segments">
                   <button className={exampleGroup === 'Complex' ? 'selected' : ''} onClick={() => setExampleGroup('Complex')}>Complex</button>

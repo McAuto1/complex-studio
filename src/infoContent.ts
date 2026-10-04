@@ -1,5 +1,5 @@
 export const INFO_CONTENT = {
-  version: '1.0.1',
+  version: '1.1.0',
   publisher: 'Publisher details can be added here.',
   about: 'Complex Studio is an interactive workbench for exploring real and complex mathematical functions with 2D plots, domain coloring, and 3D surfaces.',
   announcements: ['No announcements yet.'],

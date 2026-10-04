@@ -47,11 +47,11 @@ function astToEditor(node: MathNode, isStatic = false): EditorItem[] {
     if (name === 'sqrt' && n.args.length === 1) {
       return [{ type: 'sqrt', arg: astToEditor(n.args[0], isStatic), id: uid() }];
     }
-    if (['sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'ln', 'log', 'exp', 'gamma', 'Gamma'].includes(name) && n.args.length === 1) {
-      const displayName = name === 'gamma' || name === 'Gamma' ? (isStatic ? 'Γ' : 'gamma') : name;
+    if (['sin', 'cos', 'tan', 'sinh', 'cosh', 'tanh', 'ln', 'log', 'exp', 'gamma', 'Gamma', 'zeta'].includes(name) && n.args.length === 1) {
+      const displayName = name === 'gamma' || name === 'Gamma' ? (isStatic ? 'Γ' : 'gamma') : name === 'zeta' ? (isStatic ? 'ζ' : 'zeta') : name;
       return [{ type: 'func', name: displayName, arg: astToEditor(n.args[0], isStatic), closed: true, id: uid() }];
     }
-    const displayName = isStatic && (name === 'gamma' || name === 'Gamma') ? 'Γ' : name;
+    const displayName = isStatic && (name === 'gamma' || name === 'Gamma') ? 'Γ' : (isStatic && name === 'zeta' ? 'ζ' : name);
     const res: EditorItem[] = displayName.split('').map((c: string) => ({ type: 'char', char: c, id: uid() }));
     res.push({ type: 'char', char: '(', id: uid() });
     for (let i = 0; i < n.args.length; i++) {
